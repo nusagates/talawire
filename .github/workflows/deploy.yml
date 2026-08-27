@@ -21,11 +21,12 @@ jobs:
         password: ${{ secrets.SSH_PASSWORD }}
         port: 2122
         script: |
+          set -e
           cd ~/talawire
           git pull origin main
           docker compose up -d --build
           docker compose exec -T app composer install --no-interaction --prefer-dist --optimize-autoloader
           docker compose exec -T app npm install
           docker compose exec -T app npm run build
-          docker compose exec -T app php artisan migrate --force
+          docker compose exec -T app php artisan optimize:clear
           docker compose exec -T app php artisan config:cache
