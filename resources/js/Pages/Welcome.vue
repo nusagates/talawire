@@ -30,7 +30,7 @@ defineProps({
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
                     </svg>
                 </div>
-                <span class="font-semibold text-xl tracking-tight text-gray-800">Talawire</span>
+                <span class="font-semibold text-xl tracking-tight text-gray-800">{{ $page.props.appName }}</span>
             </div>
             
             <nav v-if="canLogin" class="flex gap-3">
@@ -68,7 +68,7 @@ defineProps({
             </h1>
             
             <p class="text-lg text-gray-600 mb-10 max-w-2xl mx-auto leading-relaxed">
-                Talawire is a clean, collaborative workspace for your organization's mindmaps. Built for speed, simplicity, and teamwork.
+                {{ $page.props.appName }} is a clean, collaborative workspace for your organization's mindmaps. Built for speed, simplicity, and teamwork.
             </p>
             
             <div class="flex flex-col sm:flex-row items-center justify-center gap-3">
@@ -89,7 +89,7 @@ defineProps({
 
         <!-- Footer -->
         <footer class="py-8 text-center text-sm text-gray-400 border-t border-gray-100">
-            Talawire &copy; 2026. Built with Laravel v{{ laravelVersion }}.
+            {{ $page.props.appName }} &copy; 2026. Built with Laravel v{{ laravelVersion }}.
         </footer>
     </div>
 </template>

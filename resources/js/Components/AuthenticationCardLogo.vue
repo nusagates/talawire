@@ -9,6 +9,6 @@ import { Link } from '@inertiajs/vue3';
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
             </svg>
         </div>
-        <span class="font-semibold text-2xl tracking-tight text-gray-900">Talawire</span>
+        <span class="font-semibold text-2xl tracking-tight text-gray-900">{{ $page.props.appName }}</span>
     </Link>
 </template>
