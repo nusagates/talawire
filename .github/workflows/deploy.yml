@@ -7,16 +7,25 @@ on:
 
 jobs:
   deploy:
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     
     steps:
-    - name: Deploy Application
-      run: |
-        cd ~/talawire
-        git pull origin main
-        docker compose up -d --build
-        docker compose exec -T app composer install --no-interaction --prefer-dist --optimize-autoloader
-        docker compose exec -T app npm install
-        docker compose exec -T app npm run build
-        docker compose exec -T app php artisan migrate --force
-        docker compose exec -T app php artisan config:cache
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Deploy via SSH
+      uses: appleboy/ssh-action@v1.2.0
+      with:
+        host: ${{ secrets.SSH_HOST }}
+        username: ${{ secrets.SSH_USER }}
+        password: ${{ secrets.SSH_PASSWORD }}
+        port: 2122
+        script: |
+          cd ~/talawire
+          git pull origin main
+          docker compose up -d --build
+          docker compose exec -T app composer install --no-interaction --prefer-dist --optimize-autoloader
+          docker compose exec -T app npm install
+          docker compose exec -T app npm run build
+          docker compose exec -T app php artisan migrate --force
+          docker compose exec -T app php artisan config:cache
