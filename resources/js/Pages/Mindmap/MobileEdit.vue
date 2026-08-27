@@ -97,6 +97,7 @@ const { findNode, addNodes, addEdges, getNodes, getEdges, onConnect, getSelected
 
 // --- EXPORT TO PDF ---
 const isExporting = ref(false);
+const isRecording = ref(false);
 const paperZoom = ref(1);
 
 const zoomPaperIn = () => { if (paperZoom.value < 2.5) paperZoom.value += 0.25; };
