@@ -37,7 +37,7 @@ The easiest way to get Talawire up and running is by using the included Docker c
 
 1.  **Clone the repository:**
     ```bash
-    git clone https://github.com/your-username/talawire.git
+    git clone https://github.com/nusagates/talawire.git
     cd talawire
     ```
 
