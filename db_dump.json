@@ -1,0 +1,16 @@
+[
+    {
+        "id": "vueflow__edge-node-1787753542448source-bottom-n_tdxc9ztgdtarget-top",
+        "source": "node-1787753542448",
+        "target": "n_tdxc9ztgd",
+        "sourceHandle": "source-bottom",
+        "targetHandle": "target-top",
+        "type": "bezier",
+        "style": {
+            "stroke": "#94a3b8",
+            "strokeWidth": 2
+        },
+        "data": [],
+        "label": null
+    }
+]
