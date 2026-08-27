@@ -1759,7 +1759,7 @@ onUnmounted(() => {
             <!-- CANVAS AREA -->
             <div ref="canvasContainer" class="flex-grow relative overflow-hidden flex items-center justify-center bg-gray-200" @dragover.prevent @drop="onDrop" @contextmenu.prevent>
                 <!-- FABs -->
-                <div class="absolute bottom-6 right-4 flex flex-col gap-3 z-40">
+                <div v-show="!isRecording && !isExporting" class="absolute bottom-6 right-4 flex flex-col gap-3 z-40">
                     <button v-if="props.canEdit && settings.diagramMode !== 'mindmap'" @click="isShapeSheetOpen = true" class="w-14 h-14 bg-blue-600 text-white rounded-full shadow-[0_4px_15px_rgba(0,0,0,0.2)] flex items-center justify-center hover:bg-blue-700 active:scale-95 transition-transform" title="Tambahkan Shape">
                         <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
                     </button>
