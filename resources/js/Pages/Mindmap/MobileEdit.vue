@@ -2515,9 +2515,9 @@ onUnmounted(() => {
             </template>
             <template #content>
                 <div class="mt-4 text-sm text-gray-600 space-y-3">
-                    <p>Fitur Perekaman Layar (Record Video) diblokir oleh browser karena membutuhkan koneksi aman (HTTPS).</p>
-                    <p>Karena Anda mengakses aplikasi ini melalui HTTP biasa (misalnya domain lokal Laragon tanpa SSL), browser mematikan fitur ini demi keamanan.</p>
-                    <p class="font-medium text-gray-800">SOLUSI: Silakan akses menggunakan http://localhost atau aktifkan sertifikat SSL (HTTPS) di Laragon Anda.</p>
+                    <p>Browser pada perangkat mobile (HP/Tablet) secara bawaan <strong>tidak mendukung</strong> fitur perekaman layar langsung dari web.</p>
+                    <p>Pesan error ini muncul bukan hanya karena masalah koneksi HTTPS, tetapi karena pembatasan keamanan dari iOS dan Android itu sendiri.</p>
+                    <p class="font-medium text-gray-800">SOLUSI: Silakan gunakan aplikasi "Screen Recorder" bawaan HP Anda, atau buka proyek ini di Laptop/PC untuk menikmati fitur rekam video.</p>
                 </div>
             </template>
             <template #footer>
