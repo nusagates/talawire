@@ -1,0 +1,54 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: docker/app/Dockerfile
+    image: talawire-app
+    container_name: talawire_app
+    restart: unless-stopped
+    working_dir: /var/www/html
+    volumes:
+      - ./:/var/www/html
+    depends_on:
+      - db
+    networks:
+      - talawire_network
+
+  web:
+    image: nginx:alpine
+    container_name: talawire_web
+    restart: unless-stopped
+    ports:
+      - "8000:80"
+    volumes:
+      - ./:/var/www/html
+      - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf
+    depends_on:
+      - app
+    networks:
+      - talawire_network
+
+  db:
+    image: postgres:15-alpine
+    container_name: talawire_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_DATABASE:-talawire}
+      POSTGRES_USER: ${DB_USERNAME:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-root}
+    ports:
+      - "5432:5432"
+    volumes:
+      - talawire_db_data:/var/lib/postgresql/data
+    networks:
+      - talawire_network
+
+networks:
+  talawire_network:
+    driver: bridge
+
+volumes:
+  talawire_db_data:
+    driver: local

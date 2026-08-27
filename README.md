@@ -31,7 +31,9 @@ Talawire is a comprehensive web-based tool for creating Mindmaps, Flowcharts, an
 *   **Video Processing:** MediaRecorder API
 *   **PDF Generation:** `jspdf` & `html2canvas`
 
-## ⚙️ Installation & Setup
+## ⚙️ Installation & Setup (Docker)
+
+The easiest way to get Talawire up and running is by using the included Docker configuration. This setup includes PHP 8.3, Nginx, PostgreSQL, and Node.js. Database data and uploaded files are automatically persisted.
 
 1.  **Clone the repository:**
     ```bash
@@ -39,36 +41,43 @@ Talawire is a comprehensive web-based tool for creating Mindmaps, Flowcharts, an
     cd talawire
     ```
 
-2.  **Install PHP Dependencies:**
-    ```bash
-    composer install
-    ```
-
-3.  **Install Node.js Dependencies:**
-    ```bash
-    npm install
-    ```
-
-4.  **Environment Setup:**
+2.  **Environment Setup:**
     ```bash
     cp .env.example .env
-    php artisan key:generate
     ```
-    *Update your `.env` file with your database credentials.*
+    *Open your `.env` file and update the database host to use the Docker container:*
+    ```env
+    DB_CONNECTION=pgsql
+    DB_HOST=db
+    DB_PORT=5432
+    DB_DATABASE=talawire
+    DB_USERNAME=postgres
+    DB_PASSWORD=root
+    ```
 
-5.  **Run Migrations:**
+3.  **Build and Start Containers:**
     ```bash
-    php artisan migrate
+    docker-compose up -d --build
     ```
 
-6.  **Compile Assets & Run Server:**
+4.  **Install Dependencies & Run Migrations (First Time Only):**
     ```bash
-    # Run Vite development server
-    npm run dev
+    # Install PHP dependencies
+    docker-compose exec app composer install
 
-    # Serve Laravel application
-    php artisan serve
+    # Generate App Key
+    docker-compose exec app php artisan key:generate
+
+    # Install Node.js dependencies and build frontend assets
+    docker-compose exec app npm install
+    docker-compose exec app npm run build
+
+    # Run database migrations
+    docker-compose exec app php artisan migrate
     ```
+
+5.  **Access the Application:**
+    Open your browser and navigate to: **http://localhost:8000**
 
 ## 📱 Accessing Mobile View
 
