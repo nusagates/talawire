@@ -97,6 +97,7 @@ const { findNode, addNodes, addEdges, getNodes, getEdges, onConnect, getSelected
 
 // --- EXPORT TO PDF ---
 const isExporting = ref(false);
+const isRecording = ref(false);
 const exportFilter = (node) => {
     const exclusions = [
         'vue-flow__controls', 
