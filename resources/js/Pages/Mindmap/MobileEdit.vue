@@ -93,10 +93,15 @@ const removeUser = (email) => {
 };
 
 
-const { findNode, addNodes, addEdges, getNodes, getEdges, onConnect, getSelectedEdges, getSelectedNodes, fitView } = useVueFlow();
+const { findNode, addNodes, addEdges, getNodes, getEdges, onConnect, getSelectedEdges, getSelectedNodes, fitView, zoomIn, zoomOut } = useVueFlow();
 
 // --- EXPORT TO PDF ---
 const isExporting = ref(false);
+const paperZoom = ref(1);
+
+const zoomPaperIn = () => { if (paperZoom.value < 2.5) paperZoom.value += 0.25; };
+const zoomPaperOut = () => { if (paperZoom.value > 0.3) paperZoom.value -= 0.25; };
+
 // Mobile specific refs
 const isShapeSheetOpen = ref(false);
 const isPropertySheetOpen = ref(false);
@@ -144,7 +149,7 @@ const exportToPdf = async () => {
         pdf.save(`${title.value || 'Mindmap'}.pdf`);
     } catch (e) {
         console.error("Export failed", e);
-        alert("Gagal mengekspor PDF.");
+        showToast("Gagal mengekspor PDF.", "error");
     } finally {
         // Restore selection
         selectedNodes.forEach(n => n.selected = true);
@@ -203,9 +208,9 @@ const exportToSvg = async () => {
         link.download = `${title.value || 'Diagram'}.svg`;
         link.href = dataUrl;
         link.click();
-    } catch (e) {
-        console.error("Export failed", e);
-        alert("Gagal mengekspor animasi SVG.");
+    } catch (error) {
+        showToast("Gagal mengekspor animasi SVG.", "error");
+        console.error(error);
     } finally {
         // Restore selection
         selectedNodes.forEach(n => n.selected = true);
@@ -214,20 +219,18 @@ const exportToSvg = async () => {
     }
 };
 
-// --- EXPORT TO VIDEO (HD) ---
-const isRecording = ref(false);
-let mediaRecorder = null;
-let recordedChunks = [];
+const isVideoRecordModalOpen = ref(false);
+const recordDurationTemp = ref(10);
+const isHttpsErrorModalOpen = ref(false);
 
 const startVideoRecording = async () => {
     try {
-        const durationStr = prompt("Berapa detik durasi video yang ingin direkam?", "10");
-        if (!durationStr) return;
-        const durationSec = parseInt(durationStr);
+        const durationSec = parseInt(recordDurationTemp.value);
         if (isNaN(durationSec) || durationSec < 1) return;
+        isVideoRecordModalOpen.value = false;
 
         if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
-            alert("Fitur Perekaman Layar (Record Video) diblokir oleh browser karena membutuhkan koneksi aman (HTTPS).\n\nKarena Anda mengakses aplikasi ini melalui HTTP biasa (misalnya domain lokal Laragon tanpa SSL), browser mematikan fitur ini demi keamanan.\n\nSOLUSI: Silakan akses menggunakan http://localhost atau aktifkan sertifikat SSL (HTTPS) di Laragon Anda.");
+            isHttpsErrorModalOpen.value = true;
             return;
         }
 
@@ -416,7 +419,8 @@ const defaultSettings = {
     diagramMode: 'mindmap', // 'mindmap' | 'flowchart' | 'uml'
     aspectRatio: 'auto', // 'auto' | '16/9' | '9/16' | '1/1'
     showMinimap: true,
-    showControls: true
+    showControls: true,
+    showPaperZoom: true
 };
 const settings = ref({ ...defaultSettings, ...(props.mindmap.settings || {}) });
 
@@ -1632,6 +1636,17 @@ onMounted(() => {
     }, 60000);
 });
 
+const isEditTitleModalOpen = ref(false);
+const editTitleTemp = ref('');
+
+const saveTitle = () => {
+    if (editTitleTemp.value.trim() !== '') {
+        title.value = editTitleTemp.value.trim();
+        updateTitle();
+    }
+    isEditTitleModalOpen.value = false;
+};
+
 onUnmounted(() => {
     window.removeEventListener('mindmap-edge-mutated', handleEdgeMutated);
     window.removeEventListener('keydown', handleGlobalKeyDown);
@@ -1640,54 +1655,79 @@ onUnmounted(() => {
 </script>
 
 <template>
-    <AppLayout :title="title">
-        <template #header>
-            <div class="flex items-center justify-between w-full">
-                <div class="flex items-center">
-                    <input 
-                        v-if="isEditingTitle" v-model="title" @blur="updateTitle" @keyup.enter="updateTitle"
-                        class="font-semibold text-xl text-gray-800 border-b-2 border-blue-500 bg-transparent px-1 py-0 w-64 outline-none ring-0"
-                        autofocus
-                    />
-                    <h2 v-else @click="isEditingTitle = true" class="font-semibold text-xl text-gray-800 cursor-pointer hover:bg-gray-100 px-1 rounded transition-colors">
-                        {{ title }}
-                    </h2>
+        <div class="flex flex-col w-full bg-gray-200 h-[100dvh] relative">
+            
+            <!-- Toast Notification -->
+            <transition 
+                enter-active-class="transition ease-out duration-300" 
+                enter-from-class="transform opacity-0 translate-y-2" 
+                enter-to-class="transform opacity-100 translate-y-0"
+                leave-active-class="transition ease-in duration-300" 
+                leave-from-class="transform opacity-100 translate-y-0" 
+                leave-to-class="transform opacity-0 translate-y-2"
+            >
+                <div v-if="saveState" class="absolute bottom-24 left-1/2 transform -translate-x-1/2 z-50 px-4 py-2 bg-gray-900/80 backdrop-blur text-white text-sm rounded-full shadow-lg pointer-events-none flex items-center gap-2">
+                    <span v-if="saveState === 'Saving...'" class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                    <svg v-else-if="saveState === 'Saved'" class="w-4 h-4 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+                    <span>{{ saveState === '' ? 'Saved' : saveState }}</span>
+                </div>
+            </transition>
+
+            <!-- Floating Top Navigation Area -->
+            <div class="absolute top-2 left-2 right-2 z-40 bg-white/90 backdrop-blur shadow-sm border border-gray-200 rounded-xl px-2 py-1.5 flex items-center justify-between pointer-events-auto">
+                <div class="flex items-center gap-1.5 overflow-hidden">
+                    <button v-if="props.canEdit && settings.diagramMode !== 'mindmap'" @click="isShapeSheetOpen = true" class="w-8 h-8 bg-blue-600 text-white rounded-full flex items-center justify-center hover:bg-blue-700 active:scale-95 transition-transform shadow-sm" title="Tambahkan Shape">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+                    </button>
+                    <button @click="isPropertySheetOpen = true" class="relative w-8 h-8 bg-gray-800 text-white rounded-full flex items-center justify-center hover:bg-gray-900 active:scale-95 transition-transform shadow-sm" title="Properties">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                        <span v-if="activeSelectionType !== 'none'" class="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full border border-white"></span>
+                    </button>
                     
-                    <span class="ml-4 text-xs transition-opacity duration-300" :class="{
-                        'text-gray-400': saveState === '',
-                        'text-gray-500 italic': saveState === 'Unsaved changes',
-                        'text-blue-500 font-semibold animate-pulse': saveState === 'Saving...',
-                        'text-green-500 font-semibold': saveState === 'Saved',
-                        'text-red-500 font-semibold': saveState === 'Error saving'
-                    }">
-                        {{ saveState || 'Auto-saved' }}
-                    </span>
-                    
-                    <div class="ml-2 border-l pl-2 border-gray-300 flex items-center gap-2">
-                        <select v-model="settings.diagramMode" class="text-xs bg-white border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 font-medium py-1 px-1">
-                            <option value="mindmap">🧠</option>
-                            <option value="flowchart">🔀</option>
-                            <option value="uml">📦</option>
-                        </select>
+                    <select v-model="settings.diagramMode" class="text-xs bg-gray-100 border-none rounded shadow-sm focus:ring-0 font-medium py-1 px-1">
+                        <option value="mindmap">🧠</option>
+                        <option value="flowchart">🔀</option>
+                        <option value="uml">📦</option>
+                    </select>
+
+                    <!-- Paper Zoom Control in Top Nav -->
+                    <div v-if="!isRecording && !isExporting && settings.showPaperZoom !== false" class="flex items-center bg-gray-100 rounded shadow-inner overflow-hidden border border-gray-200 h-7 ml-1">
+                        <button @click="zoomPaperOut" class="w-6 h-full flex items-center justify-center text-gray-600 hover:bg-gray-200 active:bg-gray-300 font-bold leading-none">-</button>
+                        <span class="text-[10px] text-gray-700 font-medium w-8 text-center cursor-pointer select-none" @click="paperZoom = 1">{{ Math.round(paperZoom * 100) }}%</span>
+                        <button @click="zoomPaperIn" class="w-6 h-full flex items-center justify-center text-gray-600 hover:bg-gray-200 active:bg-gray-300 font-bold leading-none">+</button>
                     </div>
                 </div>
                 
                 <div class="flex gap-1 text-sm items-center">
-                    <button @click="undo" :disabled="!canUndo" :class="canUndo ? 'text-gray-700 hover:text-blue-600' : 'text-gray-300'" title="Undo">
+                    <button @click="undo" :disabled="!canUndo" :class="canUndo ? 'text-gray-700 hover:text-blue-600 hover:bg-gray-100' : 'text-gray-300'" class="p-1 rounded" title="Undo">
                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"></path></svg>
                     </button>
-                    <button @click="redo" :disabled="!canRedo" :class="canRedo ? 'text-gray-700 hover:text-blue-600' : 'text-gray-300'" title="Redo">
+                    <button @click="redo" :disabled="!canRedo" :class="canRedo ? 'text-gray-700 hover:text-blue-600 hover:bg-gray-100' : 'text-gray-300'" class="p-1 rounded" title="Redo">
                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 10h-10a8 8 0 00-8 8v2M21 10l-6 6m6-6l-6-6"></path></svg>
                     </button>
-                    
-                    <button @click="isMobileMenuOpen = !isMobileMenuOpen" class="ml-2 p-1.5 bg-gray-200 text-gray-700 rounded-md">
+                    <button @click="isMobileMenuOpen = !isMobileMenuOpen" class="ml-1 p-1 bg-gray-100 text-gray-700 rounded hover:bg-gray-200 transition-colors">
                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>
                     </button>
                 </div>
             </div>
 
             <!-- Mobile Dropdown Menu -->
-            <div v-if="isMobileMenuOpen" class="absolute top-[65px] right-2 w-48 bg-white shadow-xl rounded-lg border border-gray-200 z-[100] flex flex-col py-2">
+            <div v-if="isMobileMenuOpen" class="absolute top-[50px] right-2 w-56 bg-white shadow-xl rounded-lg border border-gray-200 z-[100] flex flex-col py-2">
+                
+                <div class="px-4 py-2 border-b border-gray-100 mb-1">
+                    <p class="text-xs text-gray-500 mb-1">Judul Mindmap:</p>
+                    <div class="flex items-center justify-between">
+                        <p class="font-medium text-sm text-gray-800 truncate pr-2">{{ title || 'Untitled Mindmap' }}</p>
+                        <button @click="isEditTitleModalOpen = true; editTitleTemp = title; isMobileMenuOpen = false" class="text-blue-600 p-1 hover:bg-blue-50 rounded" title="Edit Judul">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
+                        </button>
+                    </div>
+                </div>
+
+                <button v-if="props.canEdit" @click="detectChanges(); isMobileMenuOpen = false" class="px-4 py-2 text-sm text-left hover:bg-gray-100 w-full flex items-center text-blue-600 font-medium">
+                    <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"></path></svg>
+                    Simpan Perubahan
+                </button>
                 <button @click="exportToPdf(); isMobileMenuOpen = false" class="px-4 py-2 text-sm text-left hover:bg-gray-100 w-full flex items-center">
                     <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
                     Export PDF
@@ -1696,7 +1736,7 @@ onUnmounted(() => {
                     <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
                     Export Animasi
                 </button>
-                <button @click="startVideoRecording(); isMobileMenuOpen = false" :disabled="isRecording || isExporting" class="px-4 py-2 text-sm text-left hover:bg-gray-100 w-full flex items-center disabled:opacity-50 text-red-600">
+                <button @click="isVideoRecordModalOpen = true; isMobileMenuOpen = false" :disabled="isRecording || isExporting" class="px-4 py-2 text-sm text-left hover:bg-gray-100 w-full flex items-center disabled:opacity-50 text-red-600">
                     <svg class="w-4 h-4 mr-2" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-4-8c0-2.21 1.79-4 4-4s4 1.79 4 4-1.79 4-4 4-4-1.79-4-4z"/></svg>
                     Record Video
                 </button>
@@ -1705,9 +1745,6 @@ onUnmounted(() => {
                     Bagikan
                 </button>
             </div>
-        </template>
-
-        <div class="flex w-full border-t border-gray-200 bg-gray-200 h-[calc(100vh-130px)]">
             <!-- SHAPE PALETTE MOBILE DRAWER -->
             <div v-if="props.canEdit && settings.diagramMode !== 'mindmap' && isShapeSheetOpen" class="absolute bottom-16 left-2 right-2 bg-white rounded-t-xl shadow-[0_-10px_40px_rgba(0,0,0,0.15)] flex flex-col z-50 border-t border-gray-200 max-h-[60vh] overflow-hidden pb-4">
                 <div class="flex justify-between items-center p-3 border-b bg-gray-50">
@@ -1757,24 +1794,18 @@ onUnmounted(() => {
 
 
             <!-- CANVAS AREA -->
-            <div ref="canvasContainer" class="flex-grow relative overflow-hidden flex items-center justify-center bg-gray-200" @dragover.prevent @drop="onDrop" @contextmenu.prevent>
-                <!-- FABs -->
-                <div v-show="!isRecording && !isExporting" class="absolute bottom-6 right-4 flex flex-col gap-3 z-40">
-                    <button v-if="props.canEdit && settings.diagramMode !== 'mindmap'" @click="isShapeSheetOpen = true" class="w-14 h-14 bg-blue-600 text-white rounded-full shadow-[0_4px_15px_rgba(0,0,0,0.2)] flex items-center justify-center hover:bg-blue-700 active:scale-95 transition-transform" title="Tambahkan Shape">
-                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
-                    </button>
-                    <button @click="isPropertySheetOpen = true" class="w-14 h-14 bg-gray-800 text-white rounded-full shadow-[0_4px_15px_rgba(0,0,0,0.2)] flex items-center justify-center hover:bg-gray-900 active:scale-95 transition-transform" title="Properties">
-                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
-                        <span v-if="activeSelectionType !== 'none'" class="absolute top-0 right-0 w-4 h-4 bg-red-500 rounded-full border-2 border-white"></span>
-                    </button>
-                </div>
+            <div ref="canvasContainer" class="flex-grow relative overflow-auto flex items-center justify-center bg-gray-200" @dragover.prevent @drop="onDrop" @contextmenu.prevent>
+                <!-- FABs moved to top nav -->
 
                 <div ref="whiteCanvasRef" :class="['relative overflow-hidden shadow-xl ring-1 ring-gray-900/5', settings.aspectRatio === 'auto' ? 'w-full h-full' : 'max-w-full max-h-full']" 
                      :style="{ 
                          backgroundColor: settings.backgroundColor,
                          aspectRatio: isRecording ? 'auto' : (settings.aspectRatio !== 'auto' ? settings.aspectRatio : 'auto'),
                          height: isRecording ? recordingHeight : (settings.aspectRatio !== 'auto' ? '95%' : '100%'),
-                         width: isRecording ? recordingWidth : (settings.aspectRatio !== 'auto' ? 'auto' : '100%')
+                         width: isRecording ? recordingWidth : (settings.aspectRatio !== 'auto' ? 'auto' : '100%'),
+                         transform: `scale(${paperZoom})`,
+                         transformOrigin: 'center center',
+                         transition: 'transform 0.2s ease-out'
                      }">
                      
                     <!-- Custom SVG Markers -->
@@ -2378,7 +2409,11 @@ onUnmounted(() => {
                                 </label>
                                 <label class="flex items-center cursor-pointer group">
                                     <input type="checkbox" :checked="settings.showControls !== false" @change="updateCanvasProperty('showControls', $event.target.checked)" class="rounded text-blue-600 focus:ring-blue-500 border-gray-300" />
-                                    <span class="ml-2 text-sm text-gray-700 group-hover:text-gray-900 font-medium">Tampilkan Tombol Zoom</span>
+                                    <span class="ml-2 text-sm text-gray-700 group-hover:text-gray-900 font-medium">Tampilkan Tombol Navigasi VueFlow (Kiri Bawah)</span>
+                                </label>
+                                <label class="flex items-center cursor-pointer group">
+                                    <input type="checkbox" :checked="settings.showPaperZoom !== false" @change="updateCanvasProperty('showPaperZoom', $event.target.checked)" class="rounded text-blue-600 focus:ring-blue-500 border-gray-300" />
+                                    <span class="ml-2 text-sm text-gray-700 group-hover:text-gray-900 font-medium">Tampilkan Tombol Zoom Kertas (Tengah Bawah)</span>
                                 </label>
                             </div>
                         </div>
@@ -2441,6 +2476,53 @@ onUnmounted(() => {
                 <SecondaryButton @click="isShareModalOpen = false">Done</SecondaryButton>
             </template>
         </DialogModal>
+
+        <DialogModal :show="isEditTitleModalOpen" @close="isEditTitleModalOpen = false">
+            <template #title>
+                Edit Judul Mindmap
+            </template>
+            <template #content>
+                <div class="mt-4">
+                    <TextInput v-model="editTitleTemp" type="text" class="w-full" placeholder="Masukkan judul..." @keyup.enter="saveTitle" autofocus />
+                </div>
+            </template>
+            <template #footer>
+                <SecondaryButton @click="isEditTitleModalOpen = false" class="mr-2">Batal</SecondaryButton>
+                <PrimaryButton @click="saveTitle">Simpan</PrimaryButton>
+            </template>
+        </DialogModal>
+
+        <DialogModal :show="isVideoRecordModalOpen" @close="isVideoRecordModalOpen = false">
+            <template #title>
+                Rekam Video Mindmap
+            </template>
+            <template #content>
+                <div class="mt-4">
+                    <p class="text-sm text-gray-600 mb-2">Berapa detik durasi video yang ingin direkam?</p>
+                    <TextInput v-model="recordDurationTemp" type="number" min="1" max="300" class="w-full" placeholder="Durasi dalam detik" @keyup.enter="startVideoRecording" autofocus />
+                </div>
+            </template>
+            <template #footer>
+                <SecondaryButton @click="isVideoRecordModalOpen = false" class="mr-2">Batal</SecondaryButton>
+                <PrimaryButton @click="startVideoRecording">Mulai Rekam</PrimaryButton>
+            </template>
+        </DialogModal>
+
+        <DialogModal :show="isHttpsErrorModalOpen" @close="isHttpsErrorModalOpen = false">
+            <template #title>
+                Fitur Diblokir Browser
+            </template>
+            <template #content>
+                <div class="mt-4 text-sm text-gray-600 space-y-3">
+                    <p>Fitur Perekaman Layar (Record Video) diblokir oleh browser karena membutuhkan koneksi aman (HTTPS).</p>
+                    <p>Karena Anda mengakses aplikasi ini melalui HTTP biasa (misalnya domain lokal Laragon tanpa SSL), browser mematikan fitur ini demi keamanan.</p>
+                    <p class="font-medium text-gray-800">SOLUSI: Silakan akses menggunakan http://localhost atau aktifkan sertifikat SSL (HTTPS) di Laragon Anda.</p>
+                </div>
+            </template>
+            <template #footer>
+                <PrimaryButton @click="isHttpsErrorModalOpen = false">Saya Mengerti</PrimaryButton>
+            </template>
+        </DialogModal>
         
         <!-- Toast Notification -->
         <Transition enter-active-class="transition ease-out duration-300" enter-from-class="transform opacity-0 translate-y-2" enter-to-class="transform opacity-100 translate-y-0" leave-active-class="transition ease-in duration-200" leave-from-class="transform opacity-100 translate-y-0" leave-to-class="transform opacity-0 translate-y-2">
@@ -2450,7 +2532,6 @@ onUnmounted(() => {
                 <span class="font-medium text-sm">{{ toast.message }}</span>
             </div>
         </Transition>
-    </AppLayout>
 </template>
 
 <style>

@@ -140,7 +140,7 @@ const exportToPdf = async () => {
         pdf.save(`${title.value || 'Mindmap'}.pdf`);
     } catch (e) {
         console.error("Export failed", e);
-        alert("Gagal mengekspor PDF.");
+        showToast("Gagal mengekspor PDF.", "error");
     } finally {
         // Restore selection
         selectedNodes.forEach(n => n.selected = true);
@@ -199,9 +199,9 @@ const exportToSvg = async () => {
         link.download = `${title.value || 'Diagram'}.svg`;
         link.href = dataUrl;
         link.click();
-    } catch (e) {
-        console.error("Export failed", e);
-        alert("Gagal mengekspor animasi SVG.");
+    } catch (error) {
+        showToast("Gagal mengekspor animasi SVG.", "error");
+        console.error(error);
     } finally {
         // Restore selection
         selectedNodes.forEach(n => n.selected = true);
@@ -210,20 +210,18 @@ const exportToSvg = async () => {
     }
 };
 
-// --- EXPORT TO VIDEO (HD) ---
-const isRecording = ref(false);
-let mediaRecorder = null;
-let recordedChunks = [];
+const isVideoRecordModalOpen = ref(false);
+const recordDurationTemp = ref(10);
+const isHttpsErrorModalOpen = ref(false);
 
 const startVideoRecording = async () => {
     try {
-        const durationStr = prompt("Berapa detik durasi video yang ingin direkam?", "10");
-        if (!durationStr) return;
-        const durationSec = parseInt(durationStr);
+        const durationSec = parseInt(recordDurationTemp.value);
         if (isNaN(durationSec) || durationSec < 1) return;
+        isVideoRecordModalOpen.value = false;
 
         if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
-            alert("Fitur Perekaman Layar (Record Video) diblokir oleh browser karena membutuhkan koneksi aman (HTTPS).\n\nKarena Anda mengakses aplikasi ini melalui HTTP biasa (misalnya domain lokal Laragon tanpa SSL), browser mematikan fitur ini demi keamanan.\n\nSOLUSI: Silakan akses menggunakan http://localhost atau aktifkan sertifikat SSL (HTTPS) di Laragon Anda.");
+            isHttpsErrorModalOpen.value = true;
             return;
         }
 
@@ -1648,7 +1646,7 @@ onUnmounted(() => {
                         Export Anim
                     </button>
 
-                    <button @click="startVideoRecording" :disabled="isRecording || isExporting" class="ml-2 px-4 py-1.5 bg-red-600 text-white text-sm font-medium rounded-md hover:bg-red-700 transition shadow-sm flex items-center disabled:opacity-50" title="Rekam Layar menjadi Video">
+                    <button @click="isVideoRecordModalOpen = true" :disabled="isRecording || isExporting" class="ml-2 px-4 py-1.5 bg-red-600 text-white text-sm font-medium rounded-md hover:bg-red-700 transition shadow-sm flex items-center disabled:opacity-50" title="Rekam Layar menjadi Video">
                         <svg class="w-4 h-4 mr-1.5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-4-8c0-2.21 1.79-4 4-4s4 1.79 4 4-1.79 4-4 4-4-1.79-4-4z"/></svg>
                         Record Video (HD)
                     </button>
@@ -2414,6 +2412,38 @@ onUnmounted(() => {
             </template>
             <template #footer>
                 <SecondaryButton @click="isShareModalOpen = false">Done</SecondaryButton>
+            </template>
+        </DialogModal>
+
+        <DialogModal :show="isVideoRecordModalOpen" @close="isVideoRecordModalOpen = false">
+            <template #title>
+                Rekam Video Mindmap
+            </template>
+            <template #content>
+                <div class="mt-4">
+                    <p class="text-sm text-gray-600 mb-2">Berapa detik durasi video yang ingin direkam?</p>
+                    <TextInput v-model="recordDurationTemp" type="number" min="1" max="300" class="w-full" placeholder="Durasi dalam detik" @keyup.enter="startVideoRecording" autofocus />
+                </div>
+            </template>
+            <template #footer>
+                <SecondaryButton @click="isVideoRecordModalOpen = false" class="mr-2">Batal</SecondaryButton>
+                <PrimaryButton @click="startVideoRecording">Mulai Rekam</PrimaryButton>
+            </template>
+        </DialogModal>
+
+        <DialogModal :show="isHttpsErrorModalOpen" @close="isHttpsErrorModalOpen = false">
+            <template #title>
+                Fitur Diblokir Browser
+            </template>
+            <template #content>
+                <div class="mt-4 text-sm text-gray-600 space-y-3">
+                    <p>Fitur Perekaman Layar (Record Video) diblokir oleh browser karena membutuhkan koneksi aman (HTTPS).</p>
+                    <p>Karena Anda mengakses aplikasi ini melalui HTTP biasa (misalnya domain lokal Laragon tanpa SSL), browser mematikan fitur ini demi keamanan.</p>
+                    <p class="font-medium text-gray-800">SOLUSI: Silakan akses menggunakan http://localhost atau aktifkan sertifikat SSL (HTTPS) di Laragon Anda.</p>
+                </div>
+            </template>
+            <template #footer>
+                <PrimaryButton @click="isHttpsErrorModalOpen = false">Saya Mengerti</PrimaryButton>
             </template>
         </DialogModal>
         

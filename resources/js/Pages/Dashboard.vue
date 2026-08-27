@@ -1,6 +1,10 @@
 <script setup>
 import AppLayout from '@/Layouts/AppLayout.vue';
-import { Link } from '@inertiajs/vue3';
+import { Link, router } from '@inertiajs/vue3';
+import { ref } from 'vue';
+import ConfirmationModal from '@/Components/ConfirmationModal.vue';
+import SecondaryButton from '@/Components/SecondaryButton.vue';
+import DangerButton from '@/Components/DangerButton.vue';
 
 defineProps({
     projects: {
@@ -8,6 +12,16 @@ defineProps({
         default: () => [],
     }
 });
+
+const mindmapToDelete = ref(null);
+
+const deleteMindmap = () => {
+    if (mindmapToDelete.value) {
+        router.delete(route('mindmaps.destroy', mindmapToDelete.value.id), {
+            onFinish: () => mindmapToDelete.value = null,
+        });
+    }
+};
 </script>
 
 <template>
@@ -70,9 +84,9 @@ defineProps({
                                     </div>
                                 </div>
                                 <div class="flex justify-end border-t border-gray-100 pt-3 relative z-20">
-                                    <Link :href="route('mindmaps.destroy', mindmap.id)" method="delete" as="button" class="text-xs font-medium text-red-600 hover:text-red-900 bg-red-50 hover:bg-red-100 px-3 py-1.5 rounded-md transition-colors" @click.stop="confirm('Apakah Anda yakin ingin menghapus mindmap ini?') || $event.preventDefault()">
+                                    <button @click.prevent="mindmapToDelete = mindmap" class="text-xs font-medium text-red-600 hover:text-red-900 bg-red-50 hover:bg-red-100 px-3 py-1.5 rounded-md transition-colors">
                                         Hapus
-                                    </Link>
+                                    </button>
                                 </div>
                             </div>
                         </template>
@@ -80,5 +94,19 @@ defineProps({
                 </div>
             </div>
         </div>
+        </div>
+
+        <ConfirmationModal :show="mindmapToDelete !== null" @close="mindmapToDelete = null">
+            <template #title>
+                Hapus Mindmap
+            </template>
+            <template #content>
+                Apakah Anda yakin ingin menghapus mindmap <strong>{{ mindmapToDelete?.title || 'Untitled' }}</strong>? Data yang sudah dihapus tidak dapat dikembalikan.
+            </template>
+            <template #footer>
+                <SecondaryButton @click="mindmapToDelete = null" class="mr-2">Batal</SecondaryButton>
+                <DangerButton @click="deleteMindmap">Hapus</DangerButton>
+            </template>
+        </ConfirmationModal>
     </AppLayout>
 </template>
