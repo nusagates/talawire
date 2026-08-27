@@ -94,7 +94,7 @@ const deleteMindmap = () => {
                 </div>
             </div>
         </div>
-        </div>
+
 
         <ConfirmationModal :show="mindmapToDelete !== null" @close="mindmapToDelete = null">
             <template #title>
