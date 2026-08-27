@@ -77,7 +77,7 @@ The easiest way to get Talawire up and running is by using the included Docker c
     ```
 
 5.  **Access the Application:**
-    Open your browser and navigate to: **http://localhost:8000**
+    Open your browser and navigate to: **http://localhost:8095**
 
 ## 📱 Accessing Mobile View
 
