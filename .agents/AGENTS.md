@@ -6,3 +6,4 @@
 4. **Components**: Use subtle borders (`border-gray-200`) and soft shadows (`shadow-sm` or `shadow-md`) instead of heavy glassmorphism. Corners should be gently rounded (`rounded-md` or `rounded-lg`).
 
 5. **No Native Dialogs**: Strictly avoid using native browser dialogs such as `alert()`, `prompt()`, or `confirm()` for any notifications, dialogs, or user inputs. Always use custom UI components (like modals, toasts, or custom dialogs) instead.
+6. **Always Test Build Before Commit**: Selalu jalankan npm run build secara lokal untuk menguji dan memverifikasi perubahan sebelum melakukan git commit dan git push, guna menghindari error build di server production.
