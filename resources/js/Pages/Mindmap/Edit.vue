@@ -1594,8 +1594,8 @@ onUnmounted(() => {
 </script>
 
 <template>
-    <AppLayout :title="title">
-        <template #header>
+    <component :is="props.canEdit ? AppLayout : 'div'" :title="props.canEdit ? title : undefined" :class="props.canEdit ? '' : 'h-screen w-screen overflow-hidden flex flex-col bg-gray-50'">
+        <template #header v-if="props.canEdit">
             <div class="flex items-center justify-between w-full">
                 <div class="flex items-center">
                     <input 
@@ -1856,8 +1856,8 @@ onUnmounted(() => {
                     
                     <Background :pattern-color="['#1e293b', '#0f172a', '#111827'].some(c => (settings.backgroundColor || '').includes(c)) || (settings.backgroundColor || '').includes('1e3c72') ? '#475569' : '#cbd5e1'" 
                         :variant="settings.backgroundStyle" gap="20" size="1.5" v-if="settings.backgroundStyle !== 'none'" />
-                    <Controls position="bottom-left" v-if="settings.showControls !== false" />
-                    <MiniMap position="bottom-right" class="!mb-0" v-if="settings.showMinimap !== false" />
+                    <Controls position="bottom-left" v-if="props.canEdit && settings.showControls !== false" />
+                    <MiniMap position="bottom-right" class="!mb-0" v-if="props.canEdit && settings.showMinimap !== false" />
                 </VueFlow>
                 
                 <!-- Context Menu -->
@@ -1889,7 +1889,7 @@ onUnmounted(() => {
             </div>
 
             <!-- RIGHT PROPERTIES SIDEBAR -->
-            <div class="w-72 bg-gray-50 border-l flex flex-col shadow-inner z-10 hidden md:flex">
+            <div v-show="props.canEdit" class="w-72 bg-gray-50 border-l flex flex-col shadow-inner z-10 hidden md:flex">
                 <!-- PANEL HEADER -->
                 <div class="h-14 border-b bg-white flex items-center px-4 shrink-0 shadow-sm">
                     <h3 class="font-bold text-gray-700 tracking-wide text-sm flex items-center">
@@ -2458,7 +2458,7 @@ onUnmounted(() => {
                 <span class="font-medium text-sm">{{ toast.message }}</span>
             </div>
         </Transition>
-    </AppLayout>
+    </component>
 </template>
 
 <style>

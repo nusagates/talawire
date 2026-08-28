@@ -1677,7 +1677,7 @@ onUnmounted(() => {
             </transition>
 
             <!-- Floating Top Navigation Area -->
-            <div class="absolute top-2 left-2 right-2 z-40 bg-white/90 backdrop-blur shadow-sm border border-gray-200 rounded-xl px-2 py-1.5 flex items-center justify-between pointer-events-auto">
+            <div v-show="props.canEdit" class="absolute top-2 left-2 right-2 z-40 bg-white/90 backdrop-blur shadow-sm border border-gray-200 rounded-xl px-2 py-1.5 flex items-center justify-between pointer-events-auto">
                 <div class="flex items-center gap-1.5 overflow-hidden">
                     <button v-if="props.canEdit && settings.diagramMode !== 'mindmap'" @click="isShapeSheetOpen = true" class="w-8 h-8 bg-blue-600 text-white rounded-full flex items-center justify-center hover:bg-blue-700 active:scale-95 transition-transform shadow-sm" title="Tambahkan Shape">
                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
@@ -1911,8 +1911,8 @@ onUnmounted(() => {
                     
                     <Background :pattern-color="['#1e293b', '#0f172a', '#111827'].some(c => (settings.backgroundColor || '').includes(c)) || (settings.backgroundColor || '').includes('1e3c72') ? '#475569' : '#cbd5e1'" 
                         :variant="settings.backgroundStyle" gap="20" size="1.5" v-if="settings.backgroundStyle !== 'none'" />
-                    <Controls position="bottom-left" v-if="settings.showControls !== false" />
-                    <MiniMap position="bottom-right" class="!mb-0" v-if="settings.showMinimap !== false" />
+                    <Controls position="bottom-left" v-if="props.canEdit && settings.showControls !== false" />
+                    <MiniMap position="bottom-right" class="!mb-0" v-if="props.canEdit && settings.showMinimap !== false" />
                 </VueFlow>
                 
                 <!-- Context Menu -->
