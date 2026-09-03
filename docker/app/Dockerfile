@@ -18,7 +18,16 @@ RUN apt-get update && apt-get install -y \
     curl \
     libpq-dev \
     libonig-dev \
-    libzip-dev
+    libzip-dev \
+    chromium \
+    ffmpeg \
+    libnss3 \
+    libatk-bridge2.0-0 \
+    libx11-xcb1 \
+    libxcb-dri3-0 \
+    libdrm2 \
+    libgbm1 \
+    libasound2
 
 # Clear cache
 RUN apt-get clean && rm -rf /var/lib/apt/lists/*

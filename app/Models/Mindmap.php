@@ -17,7 +17,9 @@ class Mindmap extends Model
         'edges',
         'settings',
         'is_public',
-        'public_permission'
+        'public_permission',
+        'video_export_status',
+        'last_video_url'
     ];
 
     protected $casts = [

@@ -41,3 +41,7 @@ Route::middleware([
 // Move edit and update outside auth to allow public access, but we'll manually check auth inside the controller
 Route::get('/mindmaps/{mindmap}', [\App\Http\Controllers\MindmapController::class, 'edit'])->name('mindmaps.edit');
 Route::put('/mindmaps/{mindmap}', [\App\Http\Controllers\MindmapController::class, 'update'])->name('mindmaps.update');
+
+Route::post('/mindmaps/{mindmap}/export-video', [\App\Http\Controllers\MindmapController::class, 'exportVideo'])->name('mindmaps.export_video');
+Route::get('/mindmaps/{uuid}/render-view', [\App\Http\Controllers\MindmapController::class, 'renderView'])->name('mindmap.render_view');
+Route::get('/mindmaps/{mindmap}/video-status', [\App\Http\Controllers\MindmapController::class, 'videoStatus'])->name('mindmaps.video_status');

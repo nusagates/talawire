@@ -46,7 +46,14 @@ import twemoji from '@twemoji/api';
 
 const props = defineProps({
     mindmap: Object,
-    canEdit: Boolean
+    canEdit: {
+        type: Boolean,
+        default: true
+    },
+    isRenderView: {
+        type: Boolean,
+        default: false
+    }
 });
 
 const title = ref(props.mindmap.name);
@@ -223,181 +230,44 @@ const startVideoRecording = async () => {
         if (isNaN(durationSec) || durationSec < 1) return;
         isVideoRecordModalOpen.value = false;
 
-        if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
-            isHttpsErrorModalOpen.value = true;
-            return;
-        }
-
-        const stream = await navigator.mediaDevices.getDisplayMedia({
-            video: { 
-                displaySurface: "browser", 
-                frameRate: { ideal: 60 },
-                cursor: "never"
-            },
-            preferCurrentTab: true,
-            audio: false
-        });
-        
+        toast.show = true;
+        toast.message = 'Memulai proses render video di server...';
+        toast.type = 'success';
         isRecording.value = true;
-        recordedChunks = [];
         
-        // Hide selection boxes visually for a clean recording
-        const selectedNodes = getSelectedNodes.value;
-        const selectedEdges = getSelectedEdges.value;
-        selectedNodes.forEach(n => n.selected = false);
-        selectedEdges.forEach(e => e.selected = false);
-        
-        // Freeze canvas dimensions in pixels so the Chrome Share Banner doesn't shrink it
-        recordingWidth.value = whiteCanvasRef.value.offsetWidth + 'px';
-        recordingHeight.value = whiteCanvasRef.value.offsetHeight + 'px';
-        await nextTick();
-        
-        // Auto-center the diagram so nothing is cut off by the edges
-        fitView({ padding: 0.2, duration: 300 });
-        await new Promise(r => setTimeout(r, 400));
-        
-        // Setup hidden video element to process the raw stream
-        const videoElement = document.createElement('video');
-        videoElement.srcObject = stream;
-        videoElement.muted = true;
-        await new Promise(resolve => {
-            videoElement.onloadedmetadata = () => {
-                videoElement.play();
-                resolve();
-            };
+        await axios.post(route('mindmaps.export_video', props.mindmap.id), {
+            duration: durationSec * 1000
         });
-            
-        const initialRect = whiteCanvasRef.value.getBoundingClientRect();
-        const initialScaleX = videoElement.videoWidth / window.innerWidth;
-        const initialScaleY = videoElement.videoHeight / window.innerHeight;
-        
-        // Create an off-screen canvas matched EXACTLY to the physical pixel size of the captured region
-        // This prevents blurry upscaling or detail-destroying downscaling.
-        const cropCanvas = document.createElement('canvas');
-        cropCanvas.width = Math.round(initialRect.width * initialScaleX);
-        cropCanvas.height = Math.round(initialRect.height * initialScaleY);
-        
-        const ctx = cropCanvas.getContext('2d', { alpha: false });
-        
-        let isDrawing = true;
-        const drawLoop = () => {
-            if (!isDrawing) return;
-            
-            // Dynamically track the DOM coordinates every frame to counter browser UI shifts
-            const currentRect = whiteCanvasRef.value.getBoundingClientRect();
-            // Revert to window.innerWidth/innerHeight for exact 1:1 mapping with the video stream
-            const scaleX = videoElement.videoWidth / window.innerWidth;
-            const scaleY = videoElement.videoHeight / window.innerHeight;
-            
-            // Draw only the specific region (the white paper) onto our cropCanvas
-            ctx.drawImage(
-                videoElement, 
-                currentRect.left * scaleX, 
-                currentRect.top * scaleY, 
-                currentRect.width * scaleX, 
-                currentRect.height * scaleY, 
-                0, 
-                0, 
-                cropCanvas.width, 
-                cropCanvas.height
-            );
-            requestAnimationFrame(drawLoop);
-        };
-        drawLoop();
-        
-        // Extract the cropped video stream
-        const croppedStream = cropCanvas.captureStream(60);
 
-        // Select best supported mimeType - Prioritize native mp4 for WhatsApp compatibility
-        const mimeTypes = [
-            'video/mp4;codecs=avc1',
-            'video/mp4',
-            'video/webm;codecs=h264',
-            'video/webm;codecs=vp8',
-            'video/webm'
-        ];
-        // Prioritize high bitrate for crisp text (12 Mbps)
-        let options = { 
-            mimeType: 'video/webm',
-            videoBitsPerSecond: 12000000 
-        };
-        for (let type of mimeTypes) {
-            if (MediaRecorder.isTypeSupported(type)) {
-                options.mimeType = type;
-                break;
+        // Start polling for status
+        const interval = setInterval(async () => {
+            const res = await axios.get(route('mindmaps.video_status', props.mindmap.id));
+            if (res.data.status === 'done') {
+                clearInterval(interval);
+                isRecording.value = false;
+                toast.message = 'Video berhasil dibuat! Mengunduh...';
+                
+                const link = document.createElement('a');
+                link.href = res.data.url;
+                link.download = `mindmap-${props.mindmap.id}.webm`;
+                link.click();
+                
+                setTimeout(() => toast.show = false, 3000);
+            } else if (res.data.status === 'failed') {
+                clearInterval(interval);
+                isRecording.value = false;
+                toast.type = 'error';
+                toast.message = 'Gagal merender video di server.';
+                setTimeout(() => toast.show = false, 5000);
             }
-        }
+        }, 3000);
         
-        mediaRecorder = new MediaRecorder(croppedStream, options);
-        
-        mediaRecorder.ondataavailable = (event) => {
-            if (event.data.size > 0) {
-                recordedChunks.push(event.data);
-            }
-        };
-        
-        mediaRecorder.onstop = () => {
-            const blob = new Blob(recordedChunks, { type: mediaRecorder.mimeType || 'video/webm' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.style.display = 'none';
-            a.href = url;
-            
-            // Strictly assign extension based on the actual container type.
-            // Renaming a webm container to .mp4 will break WhatsApp Android's native player.
-            let extension = 'webm';
-            if (mediaRecorder.mimeType.includes('mp4')) {
-                extension = 'mp4';
-            }
-            
-            a.download = `${title.value || 'Video'}.${extension}`;
-            document.body.appendChild(a);
-            a.click();
-            URL.revokeObjectURL(url);
-            
-            // Cleanup
-            isRecording.value = false;
-            isDrawing = false;
-            videoElement.pause();
-            videoElement.srcObject = null;
-            stream.getTracks().forEach(track => track.stop());
-            croppedStream.getTracks().forEach(track => track.stop());
-            
-            // Unfreeze dimensions
-            recordingWidth.value = null;
-            recordingHeight.value = null;
-            
-            // Restore selection
-            selectedNodes.forEach(n => n.selected = true);
-            selectedEdges.forEach(e => e.selected = true);
-        };
-        
-        
-        // Anti-freeze logic: force browser to capture 60fps by slightly jiggling the DOM
-        let jiggleId;
-        let jiggleState = false;
-        const antiFreezeJiggle = () => {
-            if (!isRecording.value) return;
-            if (canvasContainer.value) {
-                canvasContainer.value.style.transform = `translateZ(${jiggleState ? '0.001px' : '0px'})`;
-                jiggleState = !jiggleState;
-            }
-            jiggleId = requestAnimationFrame(antiFreezeJiggle);
-        };
-        antiFreezeJiggle();
-
-        mediaRecorder.start(100);
-        
-        // Stop automatically after duration
-        setTimeout(() => {
-            if (isRecording.value) {
-                stopVideoRecording();
-            }
-        }, durationSec * 1000);
-        
-    } catch (err) {
-        console.error("Gagal memulai perekaman:", err);
+    } catch (e) {
+        console.error(e);
+        toast.type = 'error';
+        toast.message = 'Gagal memicu render video.';
         isRecording.value = false;
+        setTimeout(() => toast.show = false, 5000);
     }
 };
 
@@ -756,6 +626,20 @@ onKeyStroke(['a', 'A'], (e) => {
         getNodes.value.forEach(n => n.selected = true);
         getEdges.value.forEach(e => e.selected = true);
     }
+});
+
+onMounted(() => {
+    // Initial centering
+    setTimeout(() => {
+        fitView({ padding: 0.2, duration: 800 });
+        
+        // If this is a server render view, trigger animations immediately
+        if (props.isRenderView) {
+            setTimeout(() => {
+                triggerMindmapAnimations();
+            }, 500); // Small delay to let the initial zoom settle
+        }
+    }, 100);
 });
 
 const loadExampleFlowchart = () => {
@@ -1649,9 +1533,10 @@ onUnmounted(() => {
                         Export Anim
                     </button>
 
-                    <button @click="isVideoRecordModalOpen = true" :disabled="isRecording || isExporting" class="ml-2 px-4 py-1.5 bg-red-600 text-white text-sm font-medium rounded-md hover:bg-red-700 transition shadow-sm flex items-center disabled:opacity-50" title="Rekam Layar menjadi Video">
-                        <svg class="w-4 h-4 mr-1.5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-4-8c0-2.21 1.79-4 4-4s4 1.79 4 4-1.79 4-4 4-4-1.79-4-4z"/></svg>
-                        Record Video (HD)
+                    <button @click="isVideoRecordModalOpen = true" :disabled="isRecording || isExporting" class="ml-2 px-4 py-1.5 bg-red-600 text-white text-sm font-medium rounded-md hover:bg-red-700 transition shadow-sm flex items-center disabled:opacity-50" title="Export MP4 di Server">
+                        <svg v-if="!isRecording" class="w-4 h-4 mr-1.5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-4-8c0-2.21 1.79-4 4-4s4 1.79 4 4-1.79 4-4 4-4-1.79-4-4z"/></svg>
+                        <svg v-else class="animate-spin w-4 h-4 mr-1.5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                        {{ isRecording ? 'Rendering...' : 'Export Video' }}
                     </button>
                     
                     <button v-if="props.canEdit" @click="isShareModalOpen = true" class="ml-2 px-4 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 transition shadow-sm flex items-center">

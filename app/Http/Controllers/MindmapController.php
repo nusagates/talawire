@@ -142,7 +142,35 @@ class MindmapController extends Controller
         ]);
 
         $mindmap->update($validated);
-
         return back();
+    }
+
+    public function exportVideo(Request $request, Mindmap $mindmap)
+    {
+        $durationMs = $request->input('duration', 5000);
+        $mindmap->update(['video_export_status' => 'queued', 'last_video_url' => null]);
+        
+        \App\Jobs\RenderMindmapVideo::dispatch($mindmap, auth()->id(), $durationMs);
+
+        return response()->json(['message' => 'Video export started', 'status' => 'queued']);
+    }
+
+    public function videoStatus(Mindmap $mindmap)
+    {
+        return response()->json([
+            'status' => $mindmap->video_export_status,
+            'url' => $mindmap->last_video_url
+        ]);
+    }
+
+    public function renderView($uuid)
+    {
+        $mindmap = Mindmap::where('uuid', $uuid)->firstOrFail();
+        // Return a raw Inertia view with canEdit=false for rendering
+        return \Inertia\Inertia::render('Mindmap/Edit', [
+            'mindmap' => $mindmap,
+            'canEdit' => false,
+            'isRenderView' => true,
+        ]);
     }
 }
