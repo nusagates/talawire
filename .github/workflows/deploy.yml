@@ -21,9 +21,8 @@ jobs:
         password: ${{ secrets.SSH_PASSWORD }}
         port: 2122
         script: |
-          cd ~/talawire
-          docker image prune -f || true
           set -e
+          cd ~/talawire
           git reset --hard HEAD
           git pull origin main
           docker compose up -d --build
