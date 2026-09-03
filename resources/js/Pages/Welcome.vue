@@ -33,7 +33,20 @@ defineProps({
                 <span class="font-semibold text-xl tracking-tight text-gray-800">{{ $page.props.appName }}</span>
             </div>
             
-            <nav v-if="canLogin" class="flex gap-3">
+            <nav v-if="canLogin" class="flex items-center gap-3">
+                <Link
+                    :href="route('terms.show')"
+                    class="px-3 py-2 text-sm font-medium text-gray-600 hover:text-gray-900 rounded-md transition-colors"
+                >
+                    Terms
+                </Link>
+                <Link
+                    :href="route('policy.show')"
+                    class="px-3 py-2 text-sm font-medium text-gray-600 hover:text-gray-900 rounded-md transition-colors"
+                >
+                    Privacy
+                </Link>
+
                 <Link
                     v-if="$page.props.auth.user"
                     :href="route('dashboard')"
@@ -88,8 +101,14 @@ defineProps({
         </main>
 
         <!-- Footer -->
-        <footer class="py-8 text-center text-sm text-gray-400 border-t border-gray-100">
-            {{ $page.props.appName }} &copy; 2026. Built with Laravel v{{ laravelVersion }}.
+        <footer class="py-8 text-sm text-gray-500 border-t border-gray-100 flex flex-col sm:flex-row items-center justify-between px-6 gap-4">
+            <div>
+                {{ $page.props.appName }} &copy; 2026. Built with Laravel v{{ laravelVersion }}.
+            </div>
+            <div class="flex gap-4 text-xs text-gray-500">
+                <Link :href="route('terms.show')" class="hover:underline">Terms of Service</Link>
+                <Link :href="route('policy.show')" class="hover:underline">Privacy Policy</Link>
+            </div>
         </footer>
     </div>
 </template>
