@@ -22,7 +22,7 @@ jobs:
         port: 2122
         script: |
           cd ~/talawire
-          docker system prune -af --volumes || true
+          docker image prune -f || true
           set -e
           git reset --hard HEAD
           git pull origin main
