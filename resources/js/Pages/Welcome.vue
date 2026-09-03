@@ -34,6 +34,14 @@ defineProps({
             </div>
             
             <nav v-if="canLogin" class="flex items-center gap-3">
+                <a
+                    href="https://chat.kravti.com"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="px-3 py-2 text-sm font-medium text-gray-600 hover:text-gray-900 rounded-md transition-colors"
+                >
+                    Chat Kravti
+                </a>
                 <Link
                     :href="route('terms.show')"
                     class="px-3 py-2 text-sm font-medium text-gray-600 hover:text-gray-900 rounded-md transition-colors"
@@ -106,6 +114,7 @@ defineProps({
                 {{ $page.props.appName }} &copy; 2026. Built with Laravel v{{ laravelVersion }}.
             </div>
             <div class="flex gap-4 text-xs text-gray-500">
+                <a href="https://chat.kravti.com" target="_blank" rel="noopener noreferrer" class="hover:underline">Chat Kravti</a>
                 <Link :href="route('terms.show')" class="hover:underline">Terms of Service</Link>
                 <Link :href="route('policy.show')" class="hover:underline">Privacy Policy</Link>
             </div>
