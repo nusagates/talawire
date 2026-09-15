@@ -42,6 +42,43 @@ export const initDB = () => {
     });
 };
 
+const sanitizeNodes = (nodes) => {
+    if (!Array.isArray(nodes)) return [];
+    return nodes.map(n => {
+        const rawData = n.data ? { ...n.data } : {};
+        delete rawData.onAddChild;
+        delete rawData.onAddSibling;
+        delete rawData.onDeleteNode;
+        return {
+            id: String(n.id),
+            type: n.type || 'custom',
+            position: n.position ? { x: Number(n.position.x) || 0, y: Number(n.position.y) || 0 } : { x: 0, y: 0 },
+            zIndex: n.zIndex || 0,
+            style: n.style ? JSON.parse(JSON.stringify(n.style)) : undefined,
+            data: JSON.parse(JSON.stringify(rawData))
+        };
+    });
+};
+
+const sanitizeEdges = (edges) => {
+    if (!Array.isArray(edges)) return [];
+    return edges.map(e => ({
+        id: String(e.id),
+        source: String(e.source),
+        target: String(e.target),
+        sourceHandle: e.sourceHandle,
+        targetHandle: e.targetHandle,
+        type: e.type,
+        animated: !!e.animated,
+        style: e.style ? JSON.parse(JSON.stringify(e.style)) : undefined,
+        class: e.class,
+        markerEnd: e.markerEnd,
+        markerStart: e.markerStart,
+        data: e.data ? JSON.parse(JSON.stringify(e.data)) : undefined,
+        label: e.label
+    }));
+};
+
 /**
  * Save a mindmap snapshot into local IndexedDB
  */
@@ -56,10 +93,10 @@ export const saveLocalMindmap = async (mindmapId, data, synced = false) => {
 
             const record = {
                 id: String(mindmapId),
-                name: data.name || 'Untitled Mindmap',
-                nodes: data.nodes || [],
-                edges: data.edges || [],
-                settings: data.settings || {},
+                name: String(data.name || 'Untitled Mindmap'),
+                nodes: sanitizeNodes(data.nodes),
+                edges: sanitizeEdges(data.edges),
+                settings: data.settings ? JSON.parse(JSON.stringify(data.settings)) : {},
                 updated_at: Date.now(),
                 synced: !!synced
             };
