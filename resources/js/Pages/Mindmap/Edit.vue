@@ -582,6 +582,19 @@ const mindmapBranchColors = [
 ];
 
 // --- ADVANCED ZERO-COLLISION MINDMAP TREE LAYOUT ---
+const getNodeEstimatedWidth = (node) => {
+    if (!node) return 100;
+    const isRoot = node.id === 'root' || node.data?.isRoot;
+    const shape = node.data?.shape || (isRoot ? 'box' : 'underline');
+    const label = node.data?.label || (isRoot ? 'Central Topic' : (shape === 'text' ? 'Judul Teks' : 'Node'));
+    const len = (label || '').length;
+
+    if (isRoot) return Math.max(140, len * 9 + 48);
+    if (shape === 'pill') return Math.max(100, len * 8.5 + 36);
+    if (shape === 'underline') return Math.max(70, len * 8 + 24);
+    return Math.max(100, len * 8 + 32);
+};
+
 const calculateMindmapLayout = () => {
     if (settings.value.diagramMode !== 'mindmap') return;
 
@@ -621,8 +634,8 @@ const calculateMindmapLayout = () => {
     const calcSubtree = (node, depth = 1) => {
         const children = getChildren(node.id);
         const isUnderline = node.data?.shape === 'underline';
-        const nodeHeight = isUnderline ? 34 : 44;
-        const vMargin = isUnderline ? 18 : 26;
+        const nodeHeight = isUnderline ? 28 : 36;
+        const vMargin = isUnderline ? 16 : 22;
 
         if (children.length === 0) {
             return {
@@ -649,34 +662,44 @@ const calculateMindmapLayout = () => {
     const positionSide = (rootChildren, side) => {
         const isRight = (side === 'right');
         const dir = isRight ? 'right' : 'left';
+        const rootWidth = getNodeEstimatedWidth(root);
 
         const subtrees = rootChildren.map(c => calcSubtree(c, 1));
         const totalHeight = subtrees.reduce((sum, t) => sum + t.height, 0);
         
         let startY = rootY - totalHeight / 2;
 
-        const layoutRecursive = (tree, parentX, startSubY, depth) => {
+        const layoutRecursive = (tree, parentNode, startSubY, depth) => {
             const node = tree.node;
-            const xOffset = depth === 1 ? 210 : (depth === 2 ? 145 : 125);
-            const posX = isRight ? parentX + xOffset : parentX - xOffset;
+            const parentWidth = getNodeEstimatedWidth(parentNode);
+            const nodeWidth = getNodeEstimatedWidth(node);
+            const gap = depth === 1 ? 65 : 55;
+
+            let posX;
+            if (parentNode.id === 'root' || parentNode.data?.isRoot) {
+                posX = isRight ? rootX + rootWidth / 2 + gap : rootX - rootWidth / 2 - gap - nodeWidth;
+            } else {
+                posX = isRight ? parentNode.position.x + parentWidth + gap : parentNode.position.x - gap - nodeWidth;
+            }
+
             const centerY = startSubY + tree.height / 2;
             const isUnderline = node.data?.shape === 'underline';
-            const selfH = isUnderline ? 28 : 38;
+            const selfH = isUnderline ? 28 : 36;
 
-            node.position = { x: posX, y: Math.round(centerY - selfH / 2) };
+            node.position = { x: Math.round(posX), y: Math.round(centerY - selfH / 2) };
             if (!node.data) node.data = {};
             node.data.branchDirection = dir;
 
             let childY = startSubY;
             tree.children.forEach(childTree => {
-                layoutRecursive(childTree, posX, childY, depth + 1);
+                layoutRecursive(childTree, node, childY, depth + 1);
                 childY += childTree.height;
             });
         };
 
         let currentY = startY;
         subtrees.forEach(tree => {
-            layoutRecursive(tree, rootX, currentY, 1);
+            layoutRecursive(tree, root, currentY, 1);
             currentY += tree.height;
         });
     };
@@ -1174,30 +1197,60 @@ const state = ref({
 const nodes = ref(state.value.nodes);
 const edges = ref(state.value.edges);
 
-// --- UNDO / REDO HISTORY ---
-const { undo, redo, commit, canUndo, canRedo } = useManualRefHistory(state, { clone: true, capacity: 50 });
+// --- UNDO / REDO HISTORY (NON-DESTRUCTIVE SNAPSHOTS) ---
+const historyStack = ref([]);
+const redoStack = ref([]);
+const canUndo = computed(() => historyStack.value.length > 0);
+const canRedo = computed(() => redoStack.value.length > 0);
 const saveState = ref('');
 
-const commitHistory = debounce(() => {
-    state.value = {
-        nodes: getNodes.value.map(n => ({ id: n.id, type: n.type, position: n.position, zIndex: n.zIndex || 0, style: n.style, data: { ...n.data, onAddChild: undefined, onAddSibling: undefined } })),
-        edges: getEdges.value.map(e => ({
-            id: e.id, source: e.source, target: e.target,
-            sourceHandle: e.sourceHandle, targetHandle: e.targetHandle,
-            type: e.type, animated: e.animated, style: e.style,
-            class: e.class, markerEnd: e.markerEnd, markerStart: e.markerStart,
-            data: e.data, label: e.label
-        })),
-        settings: JSON.parse(JSON.stringify(settings.value))
-    };
-    commit();
-}, 200);
+const createSnapshot = () => ({
+    nodes: JSON.parse(JSON.stringify((getNodes?.value || nodes.value || []).map(n => ({ 
+        id: n.id, type: n.type, position: n.position, zIndex: n.zIndex || 0, style: n.style, 
+        data: { ...n.data, onAddChild: undefined, onAddSibling: undefined, onDeleteNode: undefined } 
+    })))),
+    edges: JSON.parse(JSON.stringify((getEdges?.value || edges.value || []).map(e => ({
+        id: e.id, source: e.source, target: e.target,
+        sourceHandle: e.sourceHandle, targetHandle: e.targetHandle,
+        type: e.type, animated: e.animated, style: e.style,
+        class: e.class, markerEnd: e.markerEnd, markerStart: e.markerStart,
+        data: e.data, label: e.label
+    })))),
+    settings: JSON.parse(JSON.stringify(settings.value))
+});
 
-watch(state, (newState) => {
-    nodes.value = mapNodes(newState.nodes);
-    edges.value = newState.edges;
-    settings.value = newState.settings;
-}, { deep: false });
+const commitHistory = debounce(() => {
+    // Push snapshot to history without reassigning nodes.value (prevents unmount & focus loss)
+    const snapshot = createSnapshot();
+    historyStack.value.push(snapshot);
+    if (historyStack.value.length > 50) historyStack.value.shift();
+    redoStack.value = [];
+    detectChanges();
+}, 400);
+
+const undo = () => {
+    if (historyStack.value.length === 0) return;
+    const currentSnapshot = createSnapshot();
+    redoStack.value.push(currentSnapshot);
+    const previousSnapshot = historyStack.value.pop();
+    if (previousSnapshot) {
+        nodes.value = mapNodes(previousSnapshot.nodes);
+        edges.value = previousSnapshot.edges;
+        settings.value = previousSnapshot.settings;
+    }
+};
+
+const redo = () => {
+    if (redoStack.value.length === 0) return;
+    const currentSnapshot = createSnapshot();
+    historyStack.value.push(currentSnapshot);
+    const nextSnapshot = redoStack.value.pop();
+    if (nextSnapshot) {
+        nodes.value = mapNodes(nextSnapshot.nodes);
+        edges.value = nextSnapshot.edges;
+        settings.value = nextSnapshot.settings;
+    }
+};
 
 onKeyStroke(['z', 'Z'], (e) => {
     if ((e.ctrlKey || e.metaKey) && !e.shiftKey) { e.preventDefault(); if (canUndo.value) undo(); }
@@ -1808,8 +1861,8 @@ const performSave = (isManual = false) => {
     if (!props.canEdit) return;
     saveState.value = 'Saving...';
     
-    // Force active input to blur so real-time edits commit before building payload
-    if (document.activeElement instanceof HTMLElement) {
+    // Only blur when user explicitly clicks manual save button
+    if (isManual && document.activeElement instanceof HTMLElement) {
         document.activeElement.blur();
     }
     

@@ -137,23 +137,10 @@ const pathData = computed(() => {
         // For horizontal mindmap branches (source left/right to target right/left)
         if (props.sourcePosition === 'left' || props.sourcePosition === 'right') {
             const isLeft = (props.sourcePosition === 'left');
-            const stub = Math.min(22, Math.max(12, dx * 0.16));
-            
-            if (isLeft) {
-                // Leftward curve: starts at sx, goes left to tx
-                const sX = sx - stub;
-                const tX = tx + stub;
-                const cX = (sX - tX) * 0.5;
-                const pathStr = `M ${sx} ${sy} L ${sX} ${sy} C ${sX - cX} ${sy}, ${tX + cX} ${ty}, ${tX} ${ty} L ${tx} ${ty}`;
-                pathResult = [pathStr, (sx + tx) / 2, (sy + ty) / 2, 0, 0];
-            } else {
-                // Rightward curve: starts at sx, goes right to tx
-                const sX = sx + stub;
-                const tX = tx - stub;
-                const cX = (tX - sX) * 0.5;
-                const pathStr = `M ${sx} ${sy} L ${sX} ${sy} C ${sX + cX} ${sy}, ${tX - cX} ${ty}, ${tX} ${ty} L ${tx} ${ty}`;
-                pathResult = [pathStr, (sx + tx) / 2, (sy + ty) / 2, 0, 0];
-            }
+            const c1x = isLeft ? sx - dx * 0.5 : sx + dx * 0.5;
+            const c2x = isLeft ? tx + dx * 0.5 : tx - dx * 0.5;
+            const pathStr = `M ${sx} ${sy} C ${c1x} ${sy}, ${c2x} ${ty}, ${tx} ${ty}`;
+            pathResult = [pathStr, (sx + tx) / 2, (sy + ty) / 2, 0, 0];
         } else {
             pathResult = getBezierPath({ ...params, curvature: 0.45 });
         }
