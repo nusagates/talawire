@@ -12,6 +12,7 @@ import { MiniMap } from '@vue-flow/minimap';
 import { useManualRefHistory, onKeyStroke } from '@vueuse/core';
 import debounce from 'lodash/debounce';
 import MindmapNode from '@/Components/MindmapNode.vue';
+import { saveLocalMindmap, getLocalMindmap, exportMindmapToFile, importMindmapFromFile } from '@/Utils/mindmapStorage';
 
 import '@vue-flow/core/dist/style.css';
 import '@vue-flow/core/dist/theme-default.css';
@@ -581,18 +582,18 @@ const mindmapBranchColors = [
     { bg: '#6366f1', text: '#ffffff', line: '#6366f1' }, // Indigo (High Contrast White)
 ];
 
-// --- ADVANCED ZERO-COLLISION MINDMAP TREE LAYOUT ---
+// --- ADVANCED ZERO-COLLISION COMPACT MINDMAP TREE LAYOUT ---
 const getNodeEstimatedWidth = (node) => {
-    if (!node) return 100;
+    if (!node) return 60;
     const isRoot = node.id === 'root' || node.data?.isRoot;
     const shape = node.data?.shape || (isRoot ? 'box' : 'underline');
     const label = node.data?.label || (isRoot ? 'Central Topic' : (shape === 'text' ? 'Judul Teks' : 'Node'));
     const len = (label || '').length;
 
-    if (isRoot) return Math.max(140, len * 9 + 48);
-    if (shape === 'pill') return Math.max(100, len * 8.5 + 36);
-    if (shape === 'underline') return Math.max(70, len * 8 + 24);
-    return Math.max(100, len * 8 + 32);
+    if (isRoot) return Math.max(120, len * 8 + 32);
+    if (shape === 'pill') return Math.max(70, len * 7 + 22);
+    if (shape === 'underline') return Math.max(45, len * 6.5 + 14);
+    return Math.max(70, len * 7 + 20);
 };
 
 const calculateMindmapLayout = () => {
@@ -630,12 +631,12 @@ const calculateMindmapLayout = () => {
         }
     });
 
-    // Subtree height calculation
+    // Subtree height calculation (Compact vertical spacing)
     const calcSubtree = (node, depth = 1) => {
         const children = getChildren(node.id);
         const isUnderline = node.data?.shape === 'underline';
-        const nodeHeight = isUnderline ? 28 : 36;
-        const vMargin = isUnderline ? 16 : 22;
+        const nodeHeight = isUnderline ? 24 : 32;
+        const vMargin = isUnderline ? 8 : 12;
 
         if (children.length === 0) {
             return {
@@ -658,7 +659,7 @@ const calculateMindmapLayout = () => {
         };
     };
 
-    // Position a branch side
+    // Position a branch side (Compact horizontal spacing)
     const positionSide = (rootChildren, side) => {
         const isRight = (side === 'right');
         const dir = isRight ? 'right' : 'left';
@@ -673,7 +674,7 @@ const calculateMindmapLayout = () => {
             const node = tree.node;
             const parentWidth = getNodeEstimatedWidth(parentNode);
             const nodeWidth = getNodeEstimatedWidth(node);
-            const gap = depth === 1 ? 65 : 55;
+            const gap = depth === 1 ? 36 : 24;
 
             let posX;
             if (parentNode.id === 'root' || parentNode.data?.isRoot) {
@@ -684,7 +685,7 @@ const calculateMindmapLayout = () => {
 
             const centerY = startSubY + tree.height / 2;
             const isUnderline = node.data?.shape === 'underline';
-            const selfH = isUnderline ? 28 : 36;
+            const selfH = isUnderline ? 24 : 32;
 
             node.position = { x: Math.round(posX), y: Math.round(centerY - selfH / 2) };
             if (!node.data) node.data = {};
@@ -1225,6 +1226,17 @@ const commitHistory = debounce(() => {
     historyStack.value.push(snapshot);
     if (historyStack.value.length > 50) historyStack.value.shift();
     redoStack.value = [];
+
+    // 1. Instant local persistence to IndexedDB (zero latency)
+    saveLocalMindmap(props.mindmap.id, {
+        name: title.value,
+        nodes: snapshot.nodes,
+        edges: snapshot.edges,
+        settings: snapshot.settings
+    }, false);
+    saveState.value = 'Saved locally';
+
+    // 2. Trigger debounced background cloud sync
     detectChanges();
 }, 400);
 
@@ -1853,13 +1865,12 @@ const layoutNodes = (direction = 'RADIAL') => {
     commitHistory();
 };
 
-// --- AUTO SAVE ---
+// --- AUTO SAVE & WORKSPACE EXPORT/IMPORT ---
 let lastSavedData = '';
-
 
 const performSave = (isManual = false) => {
     if (!props.canEdit) return;
-    saveState.value = 'Saving...';
+    saveState.value = 'Syncing...';
     
     // Only blur when user explicitly clicks manual save button
     if (isManual && document.activeElement instanceof HTMLElement) {
@@ -1868,8 +1879,8 @@ const performSave = (isManual = false) => {
     
     const payload = {
         name: title.value,
-        nodes: getNodes.value.map(n => ({ id: n.id, type: n.type, position: n.position, zIndex: n.zIndex || 0, style: n.style, data: { ...n.data, onAddChild: undefined, onAddSibling: undefined } })),
-        edges: getEdges.value.map(e => ({
+        nodes: (getNodes.value || nodes.value).map(n => ({ id: n.id, type: n.type, position: n.position, zIndex: n.zIndex || 0, style: n.style, data: { ...n.data, onAddChild: undefined, onAddSibling: undefined, onDeleteNode: undefined } })),
+        edges: (getEdges.value || edges.value).map(e => ({
             id: e.id, source: e.source, target: e.target,
             sourceHandle: e.sourceHandle, targetHandle: e.targetHandle,
             type: e.type, animated: e.animated, style: e.style,
@@ -1879,17 +1890,20 @@ const performSave = (isManual = false) => {
         settings: settings.value,
     };
     
-    console.log('[DEBUG] Saving payload edges:', JSON.parse(JSON.stringify(payload.edges)));
-    
+    // 1. Save to local IndexedDB first
+    saveLocalMindmap(props.mindmap.id, payload, false);
+
+    // 2. Background sync to database
     axios.put(route('mindmaps.update', props.mindmap.id), payload).then(() => {
         lastSavedData = JSON.stringify(payload);
-        saveState.value = 'Saved';
-        setTimeout(() => { if (saveState.value === 'Saved') saveState.value = ''; }, 3000);
-        if (isManual) showToast('Tersimpan dengan sukses!', 'success');
+        saveLocalMindmap(props.mindmap.id, payload, true);
+        saveState.value = 'Synced';
+        setTimeout(() => { if (saveState.value === 'Synced') saveState.value = 'Saved locally'; }, 3000);
+        if (isManual) showToast('Tersimpan dan tersinkronisasi ke server!', 'success');
     }).catch(err => {
-        saveState.value = 'Error saving';
-        console.error("Auto-save failed", err);
-        showToast('Gagal menyimpan. Periksa koneksi Anda!', 'error');
+        saveState.value = 'Saved locally (Offline)';
+        console.warn("Auto-sync to database paused/offline:", err);
+        if (isManual) showToast('Tersimpan di IndexedDB lokal (offline)', 'info');
     });
 };
 
@@ -1904,8 +1918,8 @@ const saveMindmapManual = () => {
 const detectChanges = debounce(() => {
     const payload = {
         name: title.value,
-        nodes: getNodes.value.map(n => ({ id: n.id, type: n.type, position: n.position, zIndex: n.zIndex || 0, style: n.style, data: { ...n.data, onAddChild: undefined, onAddSibling: undefined } })),
-        edges: getEdges.value.map(e => ({
+        nodes: (getNodes.value || nodes.value).map(n => ({ id: n.id, type: n.type, position: n.position, zIndex: n.zIndex || 0, style: n.style, data: { ...n.data, onAddChild: undefined, onAddSibling: undefined, onDeleteNode: undefined } })),
+        edges: (getEdges.value || edges.value).map(e => ({
             id: e.id, source: e.source, target: e.target,
             sourceHandle: e.sourceHandle, targetHandle: e.targetHandle,
             type: e.type, animated: e.animated, style: e.style,
@@ -1917,13 +1931,61 @@ const detectChanges = debounce(() => {
     const payloadStr = JSON.stringify(payload);
     if (payloadStr !== lastSavedData) {
         if (lastSavedData !== '') saveState.value = 'Unsaved changes';
-        lastSavedData = payloadStr; // Update immediately so we don't trigger this again until something else changes
+        lastSavedData = payloadStr;
         saveMindmap();
     }
 }, 500, { maxWait: 1000 });
 
-// Removed deep watcher to reduce performance overhead on large graphs
-// watch([nodes, edges, settings], detectChanges, { deep: true });
+// Export to .talawire / JSON file
+const handleExportMindmapFile = () => {
+    const payload = {
+        name: title.value,
+        nodes: (getNodes.value || nodes.value).map(n => ({ id: n.id, type: n.type, position: n.position, zIndex: n.zIndex || 0, style: n.style, data: { ...n.data, onAddChild: undefined, onAddSibling: undefined, onDeleteNode: undefined } })),
+        edges: (getEdges.value || edges.value).map(e => ({
+            id: e.id, source: e.source, target: e.target,
+            sourceHandle: e.sourceHandle, targetHandle: e.targetHandle,
+            type: e.type, animated: e.animated, style: e.style,
+            class: e.class, markerEnd: e.markerEnd, markerStart: e.markerStart,
+            data: e.data, label: e.label
+        })),
+        settings: settings.value,
+    };
+    exportMindmapToFile(payload);
+    showToast('File mindmap (.talawire) berhasil diexport!', 'success');
+};
+
+// Import from .talawire / JSON file
+const fileInputRef = ref(null);
+const triggerFileInput = () => {
+    fileInputRef.value?.click();
+};
+
+const handleImportMindmapFile = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    try {
+        const imported = await importMindmapFromFile(file);
+        if (imported.name) title.value = imported.name;
+        if (imported.nodes) nodes.value = mapNodes(imported.nodes);
+        if (imported.edges) edges.value = imported.edges;
+        if (imported.settings) settings.value = { ...settings.value, ...imported.settings };
+        
+        if (settings.value.diagramMode === 'mindmap') {
+            calculateMindmapLayout();
+        }
+        
+        commitHistory();
+        setTimeout(() => {
+            fitView({ padding: 0.2, duration: 400 });
+        }, 100);
+        showToast('Mindmap berhasil diimpor!', 'success');
+    } catch (err) {
+        showToast('Gagal membaca file: ' + err.message, 'error');
+    } finally {
+        event.target.value = '';
+    }
+};
 
 const updateTitle = () => {
     isEditingTitle.value = false;
@@ -2058,7 +2120,30 @@ const handleGlobalKeyDown = (e) => {
     }
 };
 
-onMounted(() => {
+onMounted(async () => {
+    // 1. Check local IndexedDB for any unsynced offline edits
+    try {
+        const localData = await getLocalMindmap(props.mindmap.id);
+        if (localData && !localData.synced && localData.nodes && localData.nodes.length > 0) {
+            if (localData.name) title.value = localData.name;
+            if (localData.nodes) nodes.value = mapNodes(localData.nodes);
+            if (localData.edges) edges.value = localData.edges;
+            if (localData.settings) settings.value = { ...settings.value, ...localData.settings };
+            showToast('Memuat draft terbaru dari IndexedDB lokal', 'info');
+            saveMindmap();
+        } else {
+            // Save initial server state to local IndexedDB
+            saveLocalMindmap(props.mindmap.id, {
+                name: title.value,
+                nodes: nodes.value,
+                edges: edges.value,
+                settings: settings.value
+            }, true);
+        }
+    } catch (e) {
+        console.error('[IndexedDB] Init sync check error:', e);
+    }
+
     window.addEventListener('mindmap-edge-mutated', handleEdgeMutated);
     window.addEventListener('keydown', handleGlobalKeyDown);
     window.addEventListener('mousedown', onGlobalMouseDown);
@@ -2099,11 +2184,21 @@ onUnmounted(() => {
                     </button>
 
                     <!-- File Dropdown Menu -->
-                    <div v-if="isFileMenuOpen" @click.outside="isFileMenuOpen = false" class="absolute left-0 top-9 w-52 bg-white rounded-xl shadow-xl border border-gray-100 py-1.5 z-50 text-xs">
+                    <div v-if="isFileMenuOpen" @click.outside="isFileMenuOpen = false" class="absolute left-0 top-9 w-56 bg-white rounded-xl shadow-xl border border-gray-100 py-1.5 z-50 text-xs">
                         <Link :href="route('dashboard')" class="w-full text-left px-3.5 py-2 hover:bg-gray-50 flex items-center gap-2 text-gray-700 font-medium">
                             <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"></path></svg>
                             Kembali ke Dashboard
                         </Link>
+                        <div class="h-px bg-gray-100 my-1"></div>
+                        <div class="px-3.5 py-1 text-[10px] font-bold text-gray-400 uppercase tracking-wider">Berkas & Workspace</div>
+                        <button @click="handleExportMindmapFile(); isFileMenuOpen = false;" class="w-full text-left px-3.5 py-2 hover:bg-gray-50 flex items-center gap-2 text-gray-700">
+                            <svg class="w-4 h-4 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                            <span>Ekspor Berkas (.talawire)</span>
+                        </button>
+                        <button @click="triggerFileInput(); isFileMenuOpen = false;" class="w-full text-left px-3.5 py-2 hover:bg-gray-50 flex items-center gap-2 text-gray-700">
+                            <svg class="w-4 h-4 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l4-4m0 0l4 4m-4-4v12"></path></svg>
+                            <span>Impor Berkas Mindmap</span>
+                        </button>
                         <div class="h-px bg-gray-100 my-1"></div>
                         <div class="px-3.5 py-1 text-[10px] font-bold text-gray-400 uppercase tracking-wider">Mode Diagram</div>
                         <button @click="settings.diagramMode = 'mindmap'; isFileMenuOpen = false;" :class="['w-full text-left px-3.5 py-1.5 hover:bg-gray-50 flex items-center justify-between text-xs', settings.diagramMode === 'mindmap' ? 'text-blue-600 font-bold' : 'text-gray-700']">
@@ -2126,6 +2221,9 @@ onUnmounted(() => {
                     </div>
                 </div>
 
+                <!-- Hidden file input for mindmap import -->
+                <input type="file" ref="fileInputRef" @change="handleImportMindmapFile" accept=".talawire,.json" class="hidden" />
+
                 <!-- Title & Breadcrumb -->
                 <div class="flex flex-col justify-center">
                     <div class="flex items-center gap-1.5">
@@ -2145,7 +2243,7 @@ onUnmounted(() => {
                     <div class="flex items-center gap-1 text-[10px] text-gray-400 leading-none">
                         <Link :href="route('dashboard')" class="hover:text-gray-600">My Works</Link>
                         <span>/</span>
-                        <span class="truncate max-w-[80px]">{{ saveState || 'Auto-saved' }}</span>
+                        <span class="truncate max-w-[120px] font-medium" :class="saveState.includes('Error') ? 'text-red-500' : (saveState.includes('Offline') ? 'text-amber-600' : 'text-gray-400')">{{ saveState || 'Saved locally' }}</span>
                     </div>
                 </div>
             </div>
@@ -2230,7 +2328,12 @@ onUnmounted(() => {
                     <button @click="isExportMenuOpen = !isExportMenuOpen" class="p-1.5 hover:bg-gray-100 rounded-lg text-gray-600 hover:text-blue-600 transition" title="Export File">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
                     </button>
-                    <div v-if="isExportMenuOpen" @click.outside="isExportMenuOpen = false" class="absolute right-0 top-9 w-48 bg-white rounded-xl shadow-xl border border-gray-100 py-1.5 z-50 text-xs">
+                    <div v-if="isExportMenuOpen" @click.outside="isExportMenuOpen = false" class="absolute right-0 top-9 w-52 bg-white rounded-xl shadow-xl border border-gray-100 py-1.5 z-50 text-xs">
+                        <button @click="handleExportMindmapFile(); isExportMenuOpen = false;" class="w-full text-left px-3.5 py-2 hover:bg-gray-50 flex items-center gap-2 text-gray-700 font-medium">
+                            <span class="w-2 h-2 rounded-full bg-indigo-500"></span>
+                            Export Berkas (.talawire)
+                        </button>
+                        <div class="h-px bg-gray-100 my-1"></div>
                         <button @click="exportToPdf(); isExportMenuOpen = false;" class="w-full text-left px-3.5 py-2 hover:bg-gray-50 flex items-center gap-2 text-gray-700">
                             <span class="w-2 h-2 rounded-full bg-red-500"></span>
                             Export PDF Document
