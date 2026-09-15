@@ -659,23 +659,105 @@ const uploadImageNode = (event) => {
     reader.readAsDataURL(file);
 };
 
-const handleAddChild = (parentId) => {
+const mindmapBranchColors = [
+    { bg: '#ff6b6b', text: '#ffffff', line: '#ff6b6b' }, // Coral Red (Right top)
+    { bg: '#ff9f43', text: '#ffffff', line: '#ff9f43' }, // Warm Orange (Right bottom)
+    { bg: '#55efc4', text: '#1e293b', line: '#55efc4' }, // Mint Green (Left bottom)
+    { bg: '#81ecec', text: '#1e293b', line: '#81ecec' }, // Pastel Teal (Left top)
+    { bg: '#a29bfe', text: '#ffffff', line: '#a29bfe' }, // Purple
+    { bg: '#74b9ff', text: '#ffffff', line: '#74b9ff' }, // Soft Blue
+    { bg: '#fd79a8', text: '#ffffff', line: '#fd79a8' }, // Pink
+    { bg: '#ffeaa7', text: '#1e293b', line: '#fdcb6e' }, // Warm Yellow
+];
+
+const handleAddChild = (parentId, preferredDirection = null) => {
     const parent = findNode(parentId);
     if (!parent) return;
-    const newId = `node-${Date.now()}`;
-    const childNodes = getNodes.value.filter(n => props.mindmap.edges?.some(e => e.source === parentId && e.target === n.id));
-    const yOffset = (childNodes.length * 80) || 0;
     
-    addNodes([{
-        id: newId, type: 'custom',
-        position: { x: parent.position.x + 250, y: parent.position.y + yOffset },
-        data: { label: '', isNew: true, bgColor: '#ffffff', textColor: '#111827', fontSize: 14, onAddChild: handleAddChild, onAddSibling: handleAddSibling }
-    }]);
+    const activeEdges = getEdges.value || [];
+    const isRoot = parentId === 'root' || parent.data?.isRoot;
+    
+    // Determine branch direction (left or right)
+    let direction = 'right';
+    if (preferredDirection) {
+        direction = preferredDirection;
+    } else if (isRoot) {
+        const rightChildren = activeEdges.filter(e => e.source === 'root' && (e.sourceHandle === 'source-right' || e.targetHandle === 'target-left'));
+        const leftChildren = activeEdges.filter(e => e.source === 'root' && (e.sourceHandle === 'source-left' || e.targetHandle === 'target-right'));
+        direction = rightChildren.length <= leftChildren.length ? 'right' : 'left';
+    } else {
+        direction = parent.data?.branchDirection || (parent.position.x < (findNode('root')?.position.x || 400) ? 'left' : 'right');
+    }
+    
+    // Determine branch color
+    let branchColor;
+    if (isRoot) {
+        const rootChildCount = activeEdges.filter(e => e.source === 'root').length;
+        branchColor = mindmapBranchColors[rootChildCount % mindmapBranchColors.length];
+    } else {
+        branchColor = {
+            bg: parent.data?.bgColor || '#ff9f43',
+            text: parent.data?.textColor || '#ffffff',
+            line: parent.data?.branchLineColor || parent.data?.bgColor || '#ff9f43'
+        };
+    }
+    
+    const newId = `node-${Date.now()}`;
+    const sameSideChildEdges = activeEdges.filter(e => e.source === parentId && (direction === 'right' ? (e.sourceHandle === 'source-right' || !e.sourceHandle) : e.sourceHandle === 'source-left'));
+    const countOnSide = sameSideChildEdges.length;
+    
+    let yOffset = 0;
+    if (countOnSide === 0) {
+        yOffset = isRoot ? -45 : 0;
+    } else if (countOnSide === 1) {
+        yOffset = isRoot ? 45 : 60;
+    } else {
+        yOffset = countOnSide % 2 === 0 ? -(countOnSide * 40) : (countOnSide * 40);
+    }
+    
+    const posX = direction === 'right' ? parent.position.x + 220 : parent.position.x - 220;
+    const posY = parent.position.y + yOffset;
+    
+    const sourceHandle = direction === 'right' ? 'source-right' : 'source-left';
+    const targetHandle = direction === 'right' ? 'target-left' : 'target-right';
+    
+    const newNode = {
+        id: newId, 
+        type: 'custom',
+        position: { x: posX, y: posY },
+        data: { 
+            label: '', 
+            isNew: true, 
+            shape: 'pill',
+            bgColor: branchColor.bg, 
+            textColor: branchColor.text, 
+            branchLineColor: branchColor.line,
+            branchDirection: direction,
+            fontSize: 14, 
+            borderWidth: 0,
+            onAddChild: handleAddChild, 
+            onAddSibling: handleAddSibling 
+        }
+    };
+    
+    addNodes([newNode]);
 
     addEdges([{
-        id: `edge-${parentId}-${newId}`, source: parentId, target: newId,
-        type: settings.value.edgeStyle, style: { stroke: settings.value.edgeColor, strokeWidth: 2 }
+        id: `edge-${parentId}-${newId}`, 
+        source: parentId, 
+        target: newId,
+        sourceHandle: sourceHandle,
+        targetHandle: targetHandle,
+        type: 'bezier', 
+        style: { stroke: branchColor.line, strokeWidth: 2.5 }
     }]);
+
+    nextTick(() => {
+        getNodes.value.forEach(n => {
+            n.selected = (n.id === newId);
+        });
+    });
+
     commitHistory();
 };
 
@@ -688,47 +770,108 @@ const cloneNode = (nodeId) => {
         id: newId,
         type: nodeToClone.type,
         position: { x: nodeToClone.position.x + 30, y: nodeToClone.position.y + 30 },
-        data: JSON.parse(JSON.stringify(nodeToClone.data)), // Deep copy data
+        data: JSON.parse(JSON.stringify(nodeToClone.data)),
         style: nodeToClone.style ? JSON.parse(JSON.stringify(nodeToClone.style)) : undefined,
     };
     
-    // Wire up functions
     newNode.data.onAddChild = handleAddChild;
     newNode.data.onAddSibling = handleAddSibling;
-    newNode.data.isNew = true; // Auto-focus text editing
+    newNode.data.isNew = true;
     
     addNodes([newNode]);
-    
     commitHistory();
 };
 
 const handleAddSibling = (nodeId) => {
-    if (nodeId === 'root') return;
+    if (nodeId === 'root') {
+        handleAddChild('root');
+        return;
+    }
     const node = findNode(nodeId);
     if (!node) return;
-    const parentEdge = props.mindmap.edges?.find(e => e.target === nodeId) || edges.value.find(e => e.target === nodeId);
+    
+    const activeEdges = getEdges.value || [];
+    const parentEdge = activeEdges.find(e => e.target === nodeId);
     const parentId = parentEdge ? parentEdge.source : null;
     const newId = `node-${Date.now()}`;
     
-    addNodes([{
-        id: newId, type: 'custom',
-        position: { x: node.position.x, y: node.position.y + 80 },
-        data: { label: '', isNew: true, bgColor: '#ffffff', textColor: '#111827', fontSize: 14, onAddChild: handleAddChild, onAddSibling: handleAddSibling }
-    }]);
+    const direction = node.data?.branchDirection || (parentEdge?.targetHandle === 'target-right' ? 'left' : 'right');
+    const sourceHandle = parentEdge?.sourceHandle || (direction === 'right' ? 'source-right' : 'source-left');
+    const targetHandle = parentEdge?.targetHandle || (direction === 'right' ? 'target-left' : 'target-right');
+    
+    let branchColor;
+    if (parentId === 'root') {
+        const rootChildCount = activeEdges.filter(e => e.source === 'root').length;
+        branchColor = mindmapBranchColors[rootChildCount % mindmapBranchColors.length];
+    } else {
+        branchColor = {
+            bg: node.data?.bgColor || '#ff9f43',
+            text: node.data?.textColor || '#ffffff',
+            line: node.data?.branchLineColor || node.data?.bgColor || '#ff9f43'
+        };
+    }
+    
+    const newNode = {
+        id: newId, 
+        type: 'custom',
+        position: { x: node.position.x, y: node.position.y + 65 },
+        data: { 
+            label: '', 
+            isNew: true, 
+            shape: node.data?.shape || 'pill',
+            bgColor: branchColor.bg, 
+            textColor: branchColor.text, 
+            branchLineColor: branchColor.line,
+            branchDirection: direction,
+            fontSize: 14, 
+            borderWidth: 0,
+            onAddChild: handleAddChild, 
+            onAddSibling: handleAddSibling 
+        }
+    };
+    
+    addNodes([newNode]);
 
     if (parentId) {
         addEdges([{
-            id: `edge-${parentId}-${newId}`, source: parentId, target: newId,
-            type: settings.value.edgeStyle, style: { stroke: settings.value.edgeColor, strokeWidth: 2 }
+            id: `edge-${parentId}-${newId}`, 
+            source: parentId, 
+            target: newId,
+            sourceHandle: sourceHandle,
+            targetHandle: targetHandle,
+            type: parentEdge.type || 'bezier', 
+            style: { stroke: branchColor.line, strokeWidth: 2.5 }
         }]);
     }
+
+    nextTick(() => {
+        getNodes.value.forEach(n => {
+            n.selected = (n.id === newId);
+        });
+    });
+
     commitHistory();
 };
 
 const mapNodes = (rawNodes) => {
     let nodesArray = rawNodes || [];
     if (nodesArray.length === 0 && settings.value.diagramMode === 'mindmap') {
-        nodesArray = [{ id: 'root', type: 'custom', position: { x: 250, y: 250 }, data: { label: 'Central Idea', bgColor: '#ffffff', textColor: '#111827', fontSize: 14 } }];
+        nodesArray = [{ 
+            id: 'root', 
+            type: 'custom', 
+            position: { x: 450, y: 250 }, 
+            data: { 
+                label: 'Central Topic', 
+                isRoot: true,
+                shape: 'box',
+                bgColor: '#ffffff', 
+                textColor: '#0f172a', 
+                borderColor: '#38bdf8',
+                borderWidth: 2,
+                fontSize: 22,
+                fontWeight: 'bold'
+            } 
+        }];
     }
     return nodesArray.map(n => ({ ...n, data: { ...n.data, onAddChild: handleAddChild, onAddSibling: handleAddSibling } }));
 };
@@ -845,27 +988,34 @@ onConnect((params) => {
 });
 
 const onQuickConnect = ({ id, direction }) => {
-    const parentNode = nodes.value.find(n => n.id === id);
+    const parentNode = findNode(id) || nodes.value.find(n => n.id === id);
     if (!parentNode) return;
     
     const newId = 'n-' + Date.now();
     let offsetX = 0;
     let offsetY = 0;
-    const distance = 150;
+    const distanceX = 220;
+    const distanceY = 120;
     
-    if (direction === 'right') offsetX = distance;
-    if (direction === 'left') offsetX = -distance;
-    if (direction === 'bottom') offsetY = distance;
-    if (direction === 'top') offsetY = -distance;
+    if (direction === 'right') offsetX = distanceX;
+    if (direction === 'left') offsetX = -distanceX;
+    if (direction === 'bottom') offsetY = distanceY;
+    if (direction === 'top') offsetY = -distanceY;
     
     const newNode = {
         id: newId,
         type: 'custom',
         position: { x: parentNode.position.x + offsetX, y: parentNode.position.y + offsetY },
-        data: { ...parentNode.data, label: 'Ide Baru', isNew: true }
+        data: { 
+            ...parentNode.data, 
+            label: 'Ide Baru', 
+            isNew: true,
+            onAddChild: handleAddChild,
+            onAddSibling: handleAddSibling
+        }
     };
     
-    nodes.value.push(newNode);
+    addNodes([newNode]);
     
     // Choose handle based on direction
     let sourceHandle = 'source-right';
@@ -876,7 +1026,7 @@ const onQuickConnect = ({ id, direction }) => {
     if (direction === 'bottom') { sourceHandle = 'source-bottom'; targetHandle = 'target-top'; }
     if (direction === 'top') { sourceHandle = 'source-top'; targetHandle = 'target-bottom'; }
 
-    addEdges([{
+    const newEdge = {
         id: `edge-${id}-${newId}`,
         source: id,
         target: newId,
@@ -884,7 +1034,14 @@ const onQuickConnect = ({ id, direction }) => {
         targetHandle,
         type: settings.value.edgeStyle,
         style: { stroke: settings.value.edgeColor, strokeWidth: 2 }
-    }]);
+    };
+
+    if (settings.value.diagramMode === 'flowchart') {
+        newEdge.data = { arrow: 'forward', arrowModel: 'arrowclosed' };
+        updateArrowMarker(newEdge, 'forward', 'arrowclosed');
+    }
+
+    addEdges([newEdge]);
     
     commitHistory();
 };

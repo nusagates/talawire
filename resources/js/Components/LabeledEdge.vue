@@ -6,6 +6,7 @@ defineOptions({ inheritAttrs: false });
 
 const props = defineProps({
     id: { type: String, required: true },
+    type: { type: String, required: false },
     sourceX: { type: Number, required: true },
     sourceY: { type: Number, required: true },
     targetX: { type: Number, required: true },
@@ -124,16 +125,46 @@ const pathData = computed(() => {
     };
 
     let pathResult;
-    const edgeType = props.data?.type || 'smoothstep';
+    const edgeType = props.data?.type || props.type || 'bezier';
 
     if (edgeType === 'bezier') {
-        pathResult = getBezierPath(params);
+        const sx = props.sourceX;
+        const sy = props.sourceY;
+        const tx = props.targetX;
+        const ty = props.targetY;
+        const dx = Math.abs(tx - sx);
+        
+        // For horizontal mindmap branches (source left/right to target right/left)
+        if (props.sourcePosition === 'left' || props.sourcePosition === 'right') {
+            const isLeft = (props.sourcePosition === 'left');
+            const stub = Math.min(22, Math.max(12, dx * 0.16));
+            
+            if (isLeft) {
+                // Leftward curve: starts at sx, goes left to tx
+                const sX = sx - stub;
+                const tX = tx + stub;
+                const cX = (sX - tX) * 0.5;
+                const pathStr = `M ${sx} ${sy} L ${sX} ${sy} C ${sX - cX} ${sy}, ${tX + cX} ${ty}, ${tX} ${ty} L ${tx} ${ty}`;
+                pathResult = [pathStr, (sx + tx) / 2, (sy + ty) / 2, 0, 0];
+            } else {
+                // Rightward curve: starts at sx, goes right to tx
+                const sX = sx + stub;
+                const tX = tx - stub;
+                const cX = (tX - sX) * 0.5;
+                const pathStr = `M ${sx} ${sy} L ${sX} ${sy} C ${sX + cX} ${sy}, ${tX - cX} ${ty}, ${tX} ${ty} L ${tx} ${ty}`;
+                pathResult = [pathStr, (sx + tx) / 2, (sy + ty) / 2, 0, 0];
+            }
+        } else {
+            pathResult = getBezierPath({ ...params, curvature: 0.45 });
+        }
     } else if (edgeType === 'straight') {
         pathResult = getStraightPath(params);
     } else if (edgeType === 'step') {
         pathResult = getSmoothStepPath({ ...params, borderRadius: 0 });
+    } else if (edgeType === 'smoothstep') {
+        pathResult = getSmoothStepPath(params);
     } else {
-        pathResult = getSmoothStepPath(params); // smoothstep
+        pathResult = getBezierPath({ ...params, curvature: 0.45 });
     }
 
     return {
@@ -313,6 +344,8 @@ const onPathDoubleClick = (e) => {
         :style="{ ...style, strokeWidth: parseFloat(style?.strokeWidth || 2) }"
         :marker-end="markerEnd"
         :marker-start="markerStart"
+        stroke-linecap="round"
+        stroke-linejoin="round"
         fill="none"
         :class="['vue-flow__edge-path base-edge', data?.pattern === 'dotted' ? 'dotted-pattern' : '']"
     />
@@ -327,8 +360,9 @@ const onPathDoubleClick = (e) => {
         fill="none"
     />
 
-    <!-- Invisible wider edge for easier double clicking/hovering -->
+    <!-- Invisible wider edge for easier double clicking/hovering in flowchart modes -->
     <path 
+        v-if="props.data?.type !== 'bezier' || props.data?.isFlowchart"
         :d="pathData.path" 
         fill="none" 
         stroke="transparent" 

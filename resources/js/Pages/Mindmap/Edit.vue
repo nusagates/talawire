@@ -1,6 +1,6 @@
 <script setup>
 import { ref, watch, computed, nextTick, onMounted, onUnmounted } from 'vue';
-import { router } from '@inertiajs/vue3';
+import { router, Head, Link } from '@inertiajs/vue3';
 import axios from 'axios';
 import { toPng } from 'html-to-image';
 import { jsPDF } from 'jspdf';
@@ -69,6 +69,23 @@ const sharePermission = ref('view');
 const isPublic = ref(props.mindmap.is_public);
 const publicPermission = ref(props.mindmap.public_permission);
 
+// Modern clean editor UI states
+const isRightPanelOpen = ref(false);
+const isOutlinerOpen = ref(false);
+const isExportMenuOpen = ref(false);
+const isFileMenuOpen = ref(false);
+const isFavorite = ref(false);
+const isFullscreen = ref(false);
+const isZoomMenuOpen = ref(false);
+const currentSheet = ref('Map 1');
+const sheets = ref(['Map 1']);
+
+const toast = ref({ show: false, message: '', type: 'success' });
+const showToast = (message, type = 'success') => {
+    toast.value = { show: true, message, type };
+    setTimeout(() => { toast.value.show = false; }, 3500);
+};
+
 const defaultEmojiIcon = computed(() => {
     return twemoji.parse('😀', {
         folder: 'svg',
@@ -99,8 +116,23 @@ const removeUser = (email) => {
     router.delete(route('mindmaps.share.remove', [props.mindmap.id, email]), { preserveScroll: true });
 };
 
+const { findNode, addNodes, addEdges, getNodes, getEdges, onConnect, getSelectedEdges, getSelectedNodes, fitView, zoomIn, zoomOut, zoomTo, viewport } = useVueFlow();
 
-const { findNode, addNodes, addEdges, getNodes, getEdges, onConnect, getSelectedEdges, getSelectedNodes, fitView } = useVueFlow();
+const currentZoom = computed(() => {
+    return Math.round((viewport?.value?.zoom || 1) * 100);
+});
+
+const toggleFullscreen = () => {
+    if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen().catch(() => {});
+        isFullscreen.value = true;
+    } else {
+        if (document.exitFullscreen) {
+            document.exitFullscreen().catch(() => {});
+            isFullscreen.value = false;
+        }
+    }
+};
 
 // --- EXPORT TO PDF ---
 const isExporting = ref(false);
@@ -230,9 +262,7 @@ const startVideoRecording = async () => {
         if (isNaN(durationSec) || durationSec < 1) return;
         isVideoRecordModalOpen.value = false;
 
-        toast.show = true;
-        toast.message = 'Memulai proses render video di server...';
-        toast.type = 'success';
+        showToast('Memulai proses render video di server...', 'success');
         isRecording.value = true;
         
         await axios.post(route('mindmaps.export_video', props.mindmap.id), {
@@ -245,29 +275,23 @@ const startVideoRecording = async () => {
             if (res.data.status === 'done') {
                 clearInterval(interval);
                 isRecording.value = false;
-                toast.message = 'Video berhasil dibuat! Mengunduh...';
+                showToast('Video berhasil dibuat! Mengunduh...', 'success');
                 
                 const link = document.createElement('a');
                 link.href = res.data.url;
                 link.download = `mindmap-${props.mindmap.id}.webm`;
                 link.click();
-                
-                setTimeout(() => toast.show = false, 3000);
             } else if (res.data.status === 'failed') {
                 clearInterval(interval);
                 isRecording.value = false;
-                toast.type = 'error';
-                toast.message = 'Gagal merender video di server.';
-                setTimeout(() => toast.show = false, 5000);
+                showToast('Gagal merender video di server.', 'error');
             }
         }, 3000);
         
     } catch (e) {
         console.error(e);
-        toast.type = 'error';
-        toast.message = 'Gagal memicu render video.';
+        showToast('Gagal memicu render video.', 'error');
         isRecording.value = false;
-        setTimeout(() => toast.show = false, 5000);
     }
 };
 
@@ -305,37 +329,70 @@ const toggleCategory = (cat) => {
 const selectedNodeIds = ref([]);
 const selectedEdgeIds = ref([]);
 
-watch([getSelectedNodes, getSelectedEdges], ([nodes, selectedEdgesList]) => {
-    selectedNodeIds.value = nodes.map(n => n.id);
-    const newSelectedEdgeIds = selectedEdgesList.map(e => e.id);
-    selectedEdgeIds.value = newSelectedEdgeIds;
+watch([getSelectedNodes, getSelectedEdges], ([nodesList, selectedEdgesList]) => {
+    selectedNodeIds.value = nodesList.map(n => n.id);
     
-    // Auto-clear label selections for any unselected edges (e.g., clicking canvas)
-    const selectedEdgesSet = new Set(newSelectedEdgeIds);
-    getEdges.value.forEach(e => {
-        if (!selectedEdgesSet.has(e.id) && e.data?.selectedLabelId) {
-            e.data.selectedLabelId = null;
-        }
-    });
+    // In mindmap mode, structural branches cannot be selected
+    if (settings.value.diagramMode === 'mindmap' && selectedEdgesList.length > 0) {
+        selectedEdgesList.forEach(e => { e.selected = false; });
+        selectedEdgeIds.value = [];
+    } else {
+        const newSelectedEdgeIds = selectedEdgesList.map(e => e.id);
+        selectedEdgeIds.value = newSelectedEdgeIds;
+        
+        // Auto-clear label selections for any unselected edges (e.g., clicking canvas)
+        const selectedEdgesSet = new Set(newSelectedEdgeIds);
+        getEdges.value.forEach(e => {
+            if (!selectedEdgesSet.has(e.id) && e.data?.selectedLabelId) {
+                e.data.selectedLabelId = null;
+            }
+        });
+    }
 }, { deep: true });
 
 const activeSelectionType = computed(() => {
     if (getSelectedNodes.value.length > 0) return 'node';
-    if (getSelectedEdges.value.length > 0) return 'edge';
+    if (settings.value.diagramMode !== 'mindmap' && getSelectedEdges.value.length > 0) return 'edge';
     return 'none';
 });
 const activeNode = computed(() => getSelectedNodes.value[0]);
-const activeEdge = computed(() => getSelectedEdges.value[0]);
+const activeEdge = computed(() => settings.value.diagramMode !== 'mindmap' ? getSelectedEdges.value[0] : null);
 const activeEdgeLabelId = computed(() => activeEdge.value?.data?.selectedLabelId);
 const activeEdgeLabel = computed(() => {
     if (!activeEdge.value || !activeEdgeLabelId.value) return null;
     return activeEdge.value.data?.labels?.find(l => l.id === activeEdgeLabelId.value);
 });
 
-// --- CONTEXT MENU ---
+// --- CONTEXT MENU & RIGHT DRAG PAN DETECTION ---
+let isRightDragging = false;
+let rightClickStartPos = null;
+
+const onGlobalMouseDown = (e) => {
+    if (e.button === 2) {
+        rightClickStartPos = { x: e.clientX, y: e.clientY };
+        isRightDragging = false;
+    }
+};
+
+const onGlobalMouseMove = (e) => {
+    if (rightClickStartPos) {
+        const dist = Math.hypot(e.clientX - rightClickStartPos.x, e.clientY - rightClickStartPos.y);
+        if (dist > 5) {
+            isRightDragging = true;
+        }
+    }
+};
+
+const onGlobalMouseUp = (e) => {
+    rightClickStartPos = null;
+    setTimeout(() => {
+        isRightDragging = false;
+    }, 100);
+};
+
 const contextMenu = ref({ show: false, x: 0, y: 0, nodeId: null, edgeId: null, clickEvent: null });
 const onNodeContextMenu = (event) => {
-    if (!props.canEdit) return;
+    if (!props.canEdit || isRightDragging) return;
     event.event.preventDefault();
     contextMenu.value = {
         show: true,
@@ -347,7 +404,7 @@ const onNodeContextMenu = (event) => {
     };
 };
 const onEdgeContextMenu = (event) => {
-    if (!props.canEdit) return;
+    if (!props.canEdit || settings.value.diagramMode === 'mindmap' || isRightDragging) return;
     event.event.preventDefault();
     contextMenu.value = {
         show: true,
@@ -476,24 +533,264 @@ const uploadImageNode = (event) => {
     reader.readAsDataURL(file);
 };
 
-const handleAddChild = (parentId) => {
+
+const exportToPng = async () => {
+    isExporting.value = true;
+    const flowWrapper = document.querySelector('.vue-flow');
+    if (!flowWrapper) return;
+    
+    const selectedNodes = getSelectedNodes.value;
+    const selectedEdges = getSelectedEdges.value;
+    selectedNodes.forEach(n => n.selected = false);
+    selectedEdges.forEach(e => e.selected = false);
+    
+    fitView({ padding: 0.2, duration: 300 });
+    await new Promise(r => setTimeout(r, 400));
+    
+    try {
+        const dataUrl = await toPng(flowWrapper, {
+            backgroundColor: settings.value.backgroundColor || '#ffffff',
+            pixelRatio: 2,
+            filter: exportFilter
+        });
+        const link = document.createElement('a');
+        link.download = `${title.value || 'Mindmap'}.png`;
+        link.href = dataUrl;
+        link.click();
+        showToast("Berhasil mengekspor gambar PNG!", "success");
+    } catch (e) {
+        console.error("Export PNG failed", e);
+        showToast("Gagal mengekspor gambar PNG.", "error");
+    } finally {
+        selectedNodes.forEach(n => n.selected = true);
+        selectedEdges.forEach(e => e.selected = true);
+        isExporting.value = false;
+    }
+};
+
+const mindmapBranchColors = [
+    { bg: '#ef4444', text: '#ffffff', line: '#ef4444' }, // Red (High Contrast White)
+    { bg: '#f97316', text: '#ffffff', line: '#f97316' }, // Orange (High Contrast White)
+    { bg: '#10b981', text: '#ffffff', line: '#10b981' }, // Emerald Green (High Contrast White)
+    { bg: '#06b6d4', text: '#ffffff', line: '#06b6d4' }, // Cyan (High Contrast White)
+    { bg: '#3b82f6', text: '#ffffff', line: '#3b82f6' }, // Blue (High Contrast White)
+    { bg: '#8b5cf6', text: '#ffffff', line: '#8b5cf6' }, // Purple (High Contrast White)
+    { bg: '#ec4899', text: '#ffffff', line: '#ec4899' }, // Pink (High Contrast White)
+    { bg: '#f59e0b', text: '#0f172a', line: '#d97706' }, // Amber/Yellow (High Contrast Dark Slate)
+    { bg: '#14b8a6', text: '#ffffff', line: '#14b8a6' }, // Teal (High Contrast White)
+    { bg: '#6366f1', text: '#ffffff', line: '#6366f1' }, // Indigo (High Contrast White)
+];
+
+// --- ADVANCED ZERO-COLLISION MINDMAP TREE LAYOUT ---
+const calculateMindmapLayout = () => {
+    if (settings.value.diagramMode !== 'mindmap') return;
+
+    const root = findNode('root') || nodes.value.find(n => n.data?.isRoot);
+    if (!root) return;
+
+    const rootX = root.position?.x ?? 500;
+    const rootY = root.position?.y ?? 350;
+    const allEdges = getEdges.value || edges.value;
+    const allNodes = getNodes.value || nodes.value;
+
+    const getChildren = (nodeId) => {
+        return allEdges
+            .filter(e => e.source === nodeId)
+            .map(e => allNodes.find(n => n.id === e.target))
+            .filter(Boolean);
+    };
+
+    // Partition root children into Left and Right
+    const rootEdges = allEdges.filter(e => e.source === root.id);
+    const rightRootChildren = [];
+    const leftRootChildren = [];
+
+    rootEdges.forEach(e => {
+        const targetNode = allNodes.find(n => n.id === e.target);
+        if (!targetNode) return;
+        
+        const dir = targetNode.data?.branchDirection || (targetNode.position?.x < rootX ? 'left' : 'right');
+        if (dir === 'left') {
+            leftRootChildren.push(targetNode);
+        } else {
+            rightRootChildren.push(targetNode);
+        }
+    });
+
+    // Subtree height calculation
+    const calcSubtree = (node, depth = 1) => {
+        const children = getChildren(node.id);
+        const isUnderline = node.data?.shape === 'underline';
+        const nodeHeight = isUnderline ? 34 : 44;
+        const vMargin = isUnderline ? 18 : 26;
+
+        if (children.length === 0) {
+            return {
+                node,
+                depth,
+                height: nodeHeight + vMargin,
+                children: []
+            };
+        }
+
+        const childTrees = children.map(c => calcSubtree(c, depth + 1));
+        const totalChildrenHeight = childTrees.reduce((sum, c) => sum + c.height, 0);
+        const height = Math.max(nodeHeight + vMargin, totalChildrenHeight);
+
+        return {
+            node,
+            depth,
+            height,
+            children: childTrees
+        };
+    };
+
+    // Position a branch side
+    const positionSide = (rootChildren, side) => {
+        const isRight = (side === 'right');
+        const dir = isRight ? 'right' : 'left';
+
+        const subtrees = rootChildren.map(c => calcSubtree(c, 1));
+        const totalHeight = subtrees.reduce((sum, t) => sum + t.height, 0);
+        
+        let startY = rootY - totalHeight / 2;
+
+        const layoutRecursive = (tree, parentX, startSubY, depth) => {
+            const node = tree.node;
+            const xOffset = depth === 1 ? 210 : (depth === 2 ? 145 : 125);
+            const posX = isRight ? parentX + xOffset : parentX - xOffset;
+            const centerY = startSubY + tree.height / 2;
+            const isUnderline = node.data?.shape === 'underline';
+            const selfH = isUnderline ? 28 : 38;
+
+            node.position = { x: posX, y: Math.round(centerY - selfH / 2) };
+            if (!node.data) node.data = {};
+            node.data.branchDirection = dir;
+
+            let childY = startSubY;
+            tree.children.forEach(childTree => {
+                layoutRecursive(childTree, posX, childY, depth + 1);
+                childY += childTree.height;
+            });
+        };
+
+        let currentY = startY;
+        subtrees.forEach(tree => {
+            layoutRecursive(tree, rootX, currentY, 1);
+            currentY += tree.height;
+        });
+    };
+
+    positionSide(rightRootChildren, 'right');
+    positionSide(leftRootChildren, 'left');
+
+    // Update edge handles and stroke styles
+    edges.value.forEach(edge => {
+        const targetNode = allNodes.find(n => n.id === edge.target);
+        if (!targetNode) return;
+
+        const isLeft = (targetNode.data?.branchDirection === 'left' || targetNode.position?.x < rootX);
+        edge.sourceHandle = isLeft ? 'source-left' : 'source-right';
+        edge.targetHandle = isLeft ? 'target-right' : 'target-left';
+        edge.type = 'bezier';
+
+        const bColor = targetNode.data?.branchLineColor || targetNode.data?.bgColor || '#38bdf8';
+        edge.style = {
+            stroke: bColor,
+            strokeWidth: 2
+        };
+    });
+
+    commitHistory();
+};
+
+const handleAddChild = (parentId, preferredDirection = null) => {
     const parent = findNode(parentId);
     if (!parent) return;
-    const newId = `node-${Date.now()}`;
-    const childNodes = getNodes.value.filter(n => props.mindmap.edges?.some(e => e.source === parentId && e.target === n.id));
-    const yOffset = (childNodes.length * 80) || 0;
     
-    addNodes([{
-        id: newId, type: 'custom',
-        position: { x: parent.position.x + 250, y: parent.position.y + yOffset },
-        data: { label: '', isNew: true, bgColor: '#ffffff', textColor: '#111827', fontSize: 14, onAddChild: handleAddChild, onAddSibling: handleAddSibling }
-    }]);
+    const activeEdges = getEdges.value || [];
+    const isRoot = parentId === 'root' || parent.data?.isRoot;
+    
+    // Determine branch direction (left or right)
+    let direction = 'right';
+    if (preferredDirection) {
+        direction = preferredDirection;
+    } else if (isRoot) {
+        const allNodes = getNodes.value || nodes.value;
+        const rootNode = findNode('root') || parent;
+        const rootX = rootNode.position?.x ?? 500;
+        
+        // Direct root child nodes
+        const rootEdges = activeEdges.filter(e => e.source === (rootNode.id || 'root'));
+        const rootChildNodes = rootEdges.map(e => allNodes.find(n => n.id === e.target)).filter(Boolean);
+        
+        const rightCount = rootChildNodes.filter(n => n.data?.branchDirection === 'right' || (n.position && n.position.x >= rootX)).length;
+        const leftCount = rootChildNodes.filter(n => n.data?.branchDirection === 'left' || (n.position && n.position.x < rootX)).length;
+        
+        // Balance: if right has more, add to left; otherwise add to right
+        direction = rightCount > leftCount ? 'left' : 'right';
+    } else {
+        direction = parent.data?.branchDirection || (parent.position.x < (findNode('root')?.position.x || 400) ? 'left' : 'right');
+    }
+    
+    // Determine branch color
+    let branchColor;
+    if (isRoot) {
+        const rootChildCount = activeEdges.filter(e => e.source === 'root' || e.source === parent.id).length;
+        branchColor = mindmapBranchColors[rootChildCount % mindmapBranchColors.length];
+    } else {
+        branchColor = {
+            bg: parent.data?.bgColor || '#ff9f43',
+            text: parent.data?.textColor || '#ffffff',
+            line: parent.data?.branchLineColor || parent.data?.bgColor || '#ff9f43'
+        };
+    }
+    
+    const newId = `node-${Date.now()}`;
+    const sourceHandle = direction === 'right' ? 'source-right' : 'source-left';
+    const targetHandle = direction === 'right' ? 'target-left' : 'target-right';
+    
+    const isLevel1 = isRoot;
+    const newNode = {
+        id: newId, 
+        type: 'custom',
+        position: { x: parent.position.x + (direction === 'right' ? 180 : -180), y: parent.position.y },
+        data: { 
+            label: '', 
+            isNew: true, 
+            shape: isLevel1 ? 'pill' : 'underline',
+            bgColor: isLevel1 ? branchColor.bg : 'transparent', 
+            textColor: isLevel1 ? branchColor.text : '#0f172a', 
+            branchLineColor: branchColor.line,
+            branchDirection: direction,
+            fontSize: isLevel1 ? 14 : 13, 
+            borderWidth: isLevel1 ? 0 : 2,
+            onAddChild: handleAddChild, 
+            onAddSibling: handleAddSibling,
+            onDeleteNode: handleDeleteNode
+        }
+    };
+    
+    addNodes([newNode]);
 
     addEdges([{
-        id: `edge-${parentId}-${newId}`, source: parentId, target: newId,
-        type: settings.value.edgeStyle, style: { stroke: settings.value.edgeColor, strokeWidth: 2 }
+        id: `edge-${parentId}-${newId}`, 
+        source: parentId, 
+        target: newId,
+        sourceHandle: sourceHandle,
+        targetHandle: targetHandle,
+        type: 'bezier',
+        data: { type: 'bezier' },
+        style: { stroke: branchColor.line, strokeWidth: 2 }
     }]);
-    commitHistory();
+
+    calculateMindmapLayout();
+
+    nextTick(() => {
+        getNodes.value.forEach(n => {
+            n.selected = (n.id === newId);
+        });
+    });
 };
 
 const cloneNode = (nodeId) => {
@@ -505,49 +802,367 @@ const cloneNode = (nodeId) => {
         id: newId,
         type: nodeToClone.type,
         position: { x: nodeToClone.position.x + 30, y: nodeToClone.position.y + 30 },
-        data: JSON.parse(JSON.stringify(nodeToClone.data)), // Deep copy data
+        data: JSON.parse(JSON.stringify(nodeToClone.data)),
         style: nodeToClone.style ? JSON.parse(JSON.stringify(nodeToClone.style)) : undefined,
     };
     
-    // Wire up functions
     newNode.data.onAddChild = handleAddChild;
     newNode.data.onAddSibling = handleAddSibling;
-    newNode.data.isNew = true; // Auto-focus text editing
+    newNode.data.onDeleteNode = handleDeleteNode;
+    newNode.data.isNew = true;
     
     addNodes([newNode]);
-    
     commitHistory();
 };
 
 const handleAddSibling = (nodeId) => {
-    if (nodeId === 'root') return;
+    if (nodeId === 'root') {
+        handleAddChild('root');
+        return;
+    }
     const node = findNode(nodeId);
     if (!node) return;
-    const parentEdge = props.mindmap.edges?.find(e => e.target === nodeId) || edges.value.find(e => e.target === nodeId);
-    const parentId = parentEdge ? parentEdge.source : null;
+    
+    const activeEdges = getEdges.value || [];
+    const parentEdge = activeEdges.find(e => e.target === nodeId);
+    const parentId = parentEdge ? parentEdge.source : 'root';
     const newId = `node-${Date.now()}`;
     
-    addNodes([{
-        id: newId, type: 'custom',
-        position: { x: node.position.x, y: node.position.y + 80 },
-        data: { label: '', isNew: true, bgColor: '#ffffff', textColor: '#111827', fontSize: 14, onAddChild: handleAddChild, onAddSibling: handleAddSibling }
+    const direction = node.data?.branchDirection || (node.position.x < (findNode('root')?.position.x || 400) ? 'left' : 'right');
+    const sourceHandle = direction === 'right' ? 'source-right' : 'source-left';
+    const targetHandle = direction === 'right' ? 'target-left' : 'target-right';
+    
+    const isLevel1 = (parentId === 'root');
+    let branchColor;
+    if (isLevel1) {
+        const rootChildCount = activeEdges.filter(e => e.source === 'root').length;
+        branchColor = mindmapBranchColors[rootChildCount % mindmapBranchColors.length];
+    } else {
+        branchColor = {
+            bg: node.data?.bgColor || '#ff9f43',
+            text: node.data?.textColor || '#ffffff',
+            line: node.data?.branchLineColor || node.data?.bgColor || '#ff9f43'
+        };
+    }
+    
+    const newNode = {
+        id: newId, 
+        type: 'custom',
+        position: { x: node.position.x, y: node.position.y + 40 },
+        data: { 
+            label: '', 
+            isNew: true, 
+            shape: isLevel1 ? 'pill' : 'underline',
+            bgColor: isLevel1 ? branchColor.bg : 'transparent', 
+            textColor: isLevel1 ? branchColor.text : '#0f172a', 
+            branchLineColor: branchColor.line,
+            branchDirection: direction,
+            fontSize: isLevel1 ? 14 : 13, 
+            borderWidth: isLevel1 ? 0 : 2,
+            onAddChild: handleAddChild, 
+            onAddSibling: handleAddSibling,
+            onDeleteNode: handleDeleteNode
+        }
+    };
+    
+    addNodes([newNode]);
+
+    addEdges([{
+        id: `edge-${parentId}-${newId}`, 
+        source: parentId, 
+        target: newId,
+        sourceHandle: sourceHandle,
+        targetHandle: targetHandle,
+        type: 'bezier', 
+        data: { type: 'bezier' },
+        style: { stroke: branchColor.line, strokeWidth: 2 }
     }]);
 
-    if (parentId) {
-        addEdges([{
-            id: `edge-${parentId}-${newId}`, source: parentId, target: newId,
-            type: settings.value.edgeStyle, style: { stroke: settings.value.edgeColor, strokeWidth: 2 }
-        }]);
+    calculateMindmapLayout();
+
+    nextTick(() => {
+        getNodes.value.forEach(n => {
+            n.selected = (n.id === newId);
+        });
+    });
+};
+
+const loadExampleMindmap = () => {
+    const rootNode = {
+        id: 'root',
+        type: 'custom',
+        position: { x: 500, y: 350 },
+        data: {
+            label: 'Central Topic',
+            isRoot: true,
+            shape: 'box',
+            bgColor: '#ffffff',
+            textColor: '#0f172a',
+            fontSize: 20,
+            borderWidth: 2,
+            borderColor: '#1e293b',
+            onAddChild: handleAddChild,
+            onAddSibling: handleAddSibling
+        }
+    };
+
+    const exNodes = [rootNode];
+    const exEdges = [];
+
+    // Right branches
+    const rightTopics = [
+        { id: 'mt-1', label: 'Main Topic 1', color: '#ef4444' },
+        { id: 'mt-2', label: 'Main Topic 2', color: '#f97316' },
+        { id: 'mt-3', label: 'Main Topic 3', color: '#10b981' },
+        { 
+            id: 'mt-4', label: 'Main Topic 4', color: '#06b6d4',
+            subtopics: [
+                { id: 'st-4-1', label: 'Subtopic 1' },
+                { 
+                    id: 'st-4-2', label: 'Subtopic 2',
+                    subtopics: [
+                        { 
+                            id: 'st-4-2-1', label: 'Subtopic 1',
+                            subtopics: [
+                                { id: 'st-4-2-1-1', label: 'Subtopic 1' }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        },
+        { 
+            id: 'mt-14', label: 'Main Topic 14', color: '#3b82f6',
+            subtopics: [
+                { id: 'st-14-1', label: 'Subtopic 1' },
+                { id: 'st-14-2', label: 'Subtopic 2' }
+            ]
+        },
+        { id: 'mt-5', label: 'Main Topic 5', color: '#8b5cf6' },
+        { id: 'mt-6', label: 'Main Topic 6', color: '#ec4899' },
+    ];
+
+    // Left branches
+    const leftTopics = [
+        { id: 'mt-13', label: 'Main Topic 13', color: '#f59e0b' },
+        { id: 'mt-12', label: 'Main Topic 12', color: '#ef4444' },
+        { id: 'mt-11', label: 'Main Topic 11', color: '#8b5cf6' },
+        { id: 'mt-10', label: 'Main Topic 10', color: '#3b82f6' },
+        { id: 'mt-9', label: 'Main Topic 9', color: '#06b6d4' },
+        { id: 'mt-8', label: 'Main Topic 8', color: '#10b981' },
+        { id: 'mt-7', label: 'Main Topic 7', color: '#f97316' },
+    ];
+
+    rightTopics.forEach(t => {
+        exNodes.push({
+            id: t.id,
+            type: 'custom',
+            position: { x: 720, y: 350 },
+            data: {
+                label: t.label,
+                shape: 'pill',
+                bgColor: t.color,
+                textColor: '#ffffff',
+                branchLineColor: t.color,
+                branchDirection: 'right',
+                fontSize: 14,
+                borderWidth: 0,
+                onAddChild: handleAddChild,
+                onAddSibling: handleAddSibling
+            }
+        });
+        exEdges.push({
+            id: `edge-root-${t.id}`,
+            source: 'root',
+            target: t.id,
+            sourceHandle: 'source-right',
+            targetHandle: 'target-left',
+            type: 'bezier',
+            data: { type: 'bezier' },
+            style: { stroke: t.color, strokeWidth: 2 }
+        });
+
+        if (t.subtopics) {
+            const addSubTree = (subs, parentId, pColor) => {
+                subs.forEach(sub => {
+                    exNodes.push({
+                        id: sub.id,
+                        type: 'custom',
+                        position: { x: 860, y: 350 },
+                        data: {
+                            label: sub.label,
+                            shape: 'underline',
+                            bgColor: 'transparent',
+                            textColor: '#0f172a',
+                            branchLineColor: pColor,
+                            branchDirection: 'right',
+                            fontSize: 13,
+                            borderWidth: 2,
+                            onAddChild: handleAddChild,
+                            onAddSibling: handleAddSibling
+                        }
+                    });
+                    exEdges.push({
+                        id: `edge-${parentId}-${sub.id}`,
+                        source: parentId,
+                        target: sub.id,
+                        sourceHandle: 'source-right',
+                        targetHandle: 'target-left',
+                        type: 'bezier',
+                        data: { type: 'bezier' },
+                        style: { stroke: pColor, strokeWidth: 2 }
+                    });
+                    if (sub.subtopics) {
+                        addSubTree(sub.subtopics, sub.id, pColor);
+                    }
+                });
+            };
+            addSubTree(t.subtopics, t.id, t.color);
+        }
+    });
+
+    leftTopics.forEach(t => {
+        exNodes.push({
+            id: t.id,
+            type: 'custom',
+            position: { x: 280, y: 350 },
+            data: {
+                label: t.label,
+                shape: 'pill',
+                bgColor: t.color,
+                textColor: '#ffffff',
+                branchLineColor: t.color,
+                branchDirection: 'left',
+                fontSize: 14,
+                borderWidth: 0,
+                onAddChild: handleAddChild,
+                onAddSibling: handleAddSibling
+            }
+        });
+        exEdges.push({
+            id: `edge-root-${t.id}`,
+            source: 'root',
+            target: t.id,
+            sourceHandle: 'source-left',
+            targetHandle: 'target-right',
+            type: 'bezier',
+            data: { type: 'bezier' },
+            style: { stroke: t.color, strokeWidth: 2 }
+        });
+    });
+
+    nodes.value = exNodes;
+    edges.value = exEdges;
+    calculateMindmapLayout();
+
+    setTimeout(() => {
+        fitView({ padding: 0.2, duration: 400 });
+    }, 100);
+};
+
+const loadExampleFlowchart = () => {
+    const fcNodes = [
+        { id: 'fc-1', type: 'custom', position: { x: 400, y: 100 }, data: { label: 'Start Process', shape: 'pill', bgColor: '#3b82f6', textColor: '#ffffff', fontSize: 14, onAddChild: handleAddChild, onAddSibling: handleAddSibling } },
+        { id: 'fc-2', type: 'custom', position: { x: 400, y: 220 }, data: { label: 'Fetch User Data', shape: 'box', bgColor: '#f8fafc', textColor: '#1e293b', borderWidth: 2, borderColor: '#cbd5e1', fontSize: 14, onAddChild: handleAddChild, onAddSibling: handleAddSibling } },
+        { id: 'fc-3', type: 'custom', position: { x: 400, y: 350 }, data: { label: 'Is Verified?', shape: 'diamond', bgColor: '#fef3c7', textColor: '#92400e', borderWidth: 2, borderColor: '#f59e0b', fontSize: 13, onAddChild: handleAddChild, onAddSibling: handleAddSibling } },
+        { id: 'fc-4', type: 'custom', position: { x: 600, y: 480 }, data: { label: 'Send Welcome Email', shape: 'box', bgColor: '#dcfce7', textColor: '#166534', borderWidth: 2, borderColor: '#86efac', fontSize: 14, onAddChild: handleAddChild, onAddSibling: handleAddSibling } },
+        { id: 'fc-5', type: 'custom', position: { x: 200, y: 480 }, data: { label: 'Prompt Verification', shape: 'box', bgColor: '#fee2e2', textColor: '#991b1b', borderWidth: 2, borderColor: '#fca5a5', fontSize: 14, onAddChild: handleAddChild, onAddSibling: handleAddSibling } },
+    ];
+    const fcEdges = [
+        { id: 'fce-1', source: 'fc-1', target: 'fc-2', sourceHandle: 'source-bottom', targetHandle: 'target-top', type: 'smoothstep', style: { stroke: '#94a3b8', strokeWidth: 2 }, markerEnd: 'marker-arrowclosed-end-94a3b8' },
+        { id: 'fce-2', source: 'fc-2', target: 'fc-3', sourceHandle: 'source-bottom', targetHandle: 'target-top', type: 'smoothstep', style: { stroke: '#94a3b8', strokeWidth: 2 }, markerEnd: 'marker-arrowclosed-end-94a3b8' },
+        { id: 'fce-3', source: 'fc-3', target: 'fc-4', sourceHandle: 'source-right', targetHandle: 'target-top', type: 'smoothstep', style: { stroke: '#10b981', strokeWidth: 2 }, markerEnd: 'marker-arrowclosed-end-10b981', data: { labels: [{ id: 'lbl-yes', text: 'Yes', progress: 0.5 }] } },
+        { id: 'fce-4', source: 'fc-3', target: 'fc-5', sourceHandle: 'source-left', targetHandle: 'target-top', type: 'smoothstep', style: { stroke: '#ef4444', strokeWidth: 2 }, markerEnd: 'marker-arrowclosed-end-ef4444', data: { labels: [{ id: 'lbl-no', text: 'No', progress: 0.5 }] } },
+    ];
+    nodes.value = fcNodes;
+    edges.value = fcEdges;
+    commitHistory();
+    setTimeout(() => {
+        fitView({ padding: 0.2, duration: 400 });
+    }, 100);
+};
+
+// --- RECURSIVE CASCADE DELETE ---
+const getAllDescendantNodeIds = (startNodeIds) => {
+    const toDelete = new Set(startNodeIds);
+    const queue = [...startNodeIds];
+    const allEdges = getEdges?.value || edges?.value || [];
+    
+    while (queue.length > 0) {
+        const currentId = queue.shift();
+        const childEdges = allEdges.filter(e => e.source === currentId);
+        childEdges.forEach(e => {
+            if (!toDelete.has(e.target)) {
+                toDelete.add(e.target);
+                queue.push(e.target);
+            }
+        });
+    }
+    return Array.from(toDelete);
+};
+
+const handleDeleteNodes = (nodeIds) => {
+    if (!props.canEdit || !nodeIds || nodeIds.length === 0) return;
+    
+    const targetIds = Array.isArray(nodeIds) ? nodeIds : [nodeIds];
+    // Filter out root from deletion (Central Topic cannot be deleted)
+    const filteredTargetIds = targetIds.filter(id => id !== 'root');
+    if (filteredTargetIds.length === 0) return;
+
+    // Get all descendant IDs (cascade delete parent and all children recursively)
+    const allIdsToDelete = getAllDescendantNodeIds(filteredTargetIds).filter(id => id !== 'root');
+    const deleteSet = new Set(allIdsToDelete);
+
+    // Remove nodes
+    nodes.value = (nodes.value || []).filter(n => !deleteSet.has(n.id));
+
+    // Remove connected edges
+    edges.value = (edges.value || []).filter(e => !deleteSet.has(e.source) && !deleteSet.has(e.target));
+
+    if (settings.value.diagramMode === 'mindmap') {
+        calculateMindmapLayout();
     }
     commitHistory();
+};
+
+const handleDeleteNode = (nodeId) => {
+    const selectedNodes = getSelectedNodes?.value || [];
+    if (selectedNodes.some(n => n.id === nodeId)) {
+        handleDeleteNodes(selectedNodes.map(n => n.id));
+    } else {
+        handleDeleteNodes([nodeId]);
+    }
 };
 
 const mapNodes = (rawNodes) => {
     let nodesArray = rawNodes || [];
     if (nodesArray.length === 0 && settings.value.diagramMode === 'mindmap') {
-        nodesArray = [{ id: 'root', type: 'custom', position: { x: 250, y: 250 }, data: { label: 'Central Idea', bgColor: '#ffffff', textColor: '#111827', fontSize: 14 } }];
+        nodesArray = [{ 
+            id: 'root', 
+            type: 'custom', 
+            position: { x: 450, y: 250 }, 
+            data: { 
+                label: 'Central Topic', 
+                isRoot: true,
+                shape: 'box',
+                bgColor: '#ffffff', 
+                textColor: '#0f172a', 
+                borderColor: '#38bdf8',
+                borderWidth: 2,
+                fontSize: 22,
+                fontWeight: 'bold'
+            } 
+        }];
     }
-    return nodesArray.map(n => ({ ...n, data: { ...n.data, onAddChild: handleAddChild, onAddSibling: handleAddSibling } }));
+    return nodesArray.map(n => ({ 
+        ...n, 
+        data: { 
+            ...n.data, 
+            onAddChild: handleAddChild, 
+            onAddSibling: handleAddSibling,
+            onDeleteNode: handleDeleteNode
+        } 
+    }));
 };
 
 const state = ref({
@@ -642,61 +1257,40 @@ onMounted(() => {
     }, 100);
 });
 
-const loadExampleFlowchart = () => {
-    const exNodes = [
-        { id: 'start', type: 'custom', position: { x: 300, y: 50 }, data: { label: 'Mulai', shape: 'pill', bgColor: '#10b981', textColor: '#ffffff' } },
-        { id: 'decision', type: 'custom', position: { x: 300, y: 180 }, data: { label: 'Kondisi Valid?', shape: 'diamond', bgColor: '#f59e0b', textColor: '#ffffff' } },
-        { id: 'process1', type: 'custom', position: { x: 100, y: 300 }, data: { label: 'Proses Invalid', shape: 'box', bgColor: '#ef4444', textColor: '#ffffff' } },
-        { id: 'process2', type: 'custom', position: { x: 500, y: 300 }, data: { label: 'Proses Lanjut', shape: 'box', bgColor: '#3b82f6', textColor: '#ffffff' } },
-        { id: 'end', type: 'custom', position: { x: 300, y: 450 }, data: { label: 'Selesai', shape: 'pill', bgColor: '#10b981', textColor: '#ffffff' } },
-    ];
-    
-    const exEdges = [
-        { id: 'e1', source: 'start', target: 'decision', type: 'smoothstep', animated: true, data: { arrow: 'forward' } },
-        { id: 'e2', source: 'decision', target: 'process1', sourceHandle: 'source-left', targetHandle: 'target-top', type: 'step', data: { label: 'Tidak', arrow: 'forward', arrowModel: 'arrow' } },
-        { id: 'e3', source: 'decision', target: 'process2', sourceHandle: 'source-right', targetHandle: 'target-top', type: 'step', data: { label: 'Ya', arrow: 'forward' } },
-        { id: 'e4', source: 'process1', target: 'end', sourceHandle: 'source-bottom', targetHandle: 'target-left', type: 'smoothstep', data: { arrow: 'forward' } },
-        { id: 'e5', source: 'process2', target: 'end', sourceHandle: 'source-bottom', targetHandle: 'target-right', type: 'smoothstep', data: { arrow: 'forward' } }
-    ];
-    
-    nodes.value = mapNodes(exNodes);
-    edges.value = exEdges;
-    settings.value.diagramMode = 'flowchart';
-    settings.value.edgeStyle = 'step';
-    
-    setTimeout(() => {
-        fitView({ padding: 0.2, duration: 800 });
-        commitHistory();
-    }, 100);
-};
-
 onConnect((params) => {
     addEdges([{...params, type: settings.value.edgeStyle, style: { stroke: settings.value.edgeColor, strokeWidth: 2 }}]);
     commitHistory();
 });
 
 const onQuickConnect = ({ id, direction }) => {
-    const parentNode = nodes.value.find(n => n.id === id);
+    const parentNode = findNode(id) || nodes.value.find(n => n.id === id);
     if (!parentNode) return;
     
     const newId = 'n-' + Date.now();
     let offsetX = 0;
     let offsetY = 0;
-    const distance = 150;
+    const distanceX = 220;
+    const distanceY = 120;
     
-    if (direction === 'right') offsetX = distance;
-    if (direction === 'left') offsetX = -distance;
-    if (direction === 'bottom') offsetY = distance;
-    if (direction === 'top') offsetY = -distance;
+    if (direction === 'right') offsetX = distanceX;
+    if (direction === 'left') offsetX = -distanceX;
+    if (direction === 'bottom') offsetY = distanceY;
+    if (direction === 'top') offsetY = -distanceY;
     
     const newNode = {
         id: newId,
         type: 'custom',
         position: { x: parentNode.position.x + offsetX, y: parentNode.position.y + offsetY },
-        data: { ...parentNode.data, label: 'Ide Baru', isNew: true }
+        data: { 
+            ...parentNode.data, 
+            label: 'Ide Baru', 
+            isNew: true,
+            onAddChild: handleAddChild,
+            onAddSibling: handleAddSibling
+        }
     };
     
-    nodes.value.push(newNode);
+    addNodes([newNode]);
     
     // Choose handle based on direction
     let sourceHandle = 'source-right';
@@ -707,7 +1301,7 @@ const onQuickConnect = ({ id, direction }) => {
     if (direction === 'bottom') { sourceHandle = 'source-bottom'; targetHandle = 'target-top'; }
     if (direction === 'top') { sourceHandle = 'source-top'; targetHandle = 'target-bottom'; }
 
-    addEdges([{
+    const newEdge = {
         id: `edge-${id}-${newId}`,
         source: id,
         target: newId,
@@ -715,7 +1309,14 @@ const onQuickConnect = ({ id, direction }) => {
         targetHandle,
         type: settings.value.edgeStyle,
         style: { stroke: settings.value.edgeColor, strokeWidth: 2 }
-    }]);
+    };
+
+    if (settings.value.diagramMode === 'flowchart') {
+        newEdge.data = { arrow: 'forward', arrowModel: 'arrowclosed' };
+        updateArrowMarker(newEdge, 'forward', 'arrowclosed');
+    }
+
+    addEdges([newEdge]);
     
     commitHistory();
 };
@@ -832,6 +1433,11 @@ const onEdgeUpdateEnd = () => {
 };
 
 const onEdgeClick = ({ edge }) => {
+    if (settings.value.diagramMode === 'mindmap') {
+        // In mindmap mode, structural branches cannot be selected or deleted
+        edges.value.forEach(e => { e.selected = false; });
+        return;
+    }
     const chainIds = getEdgeChain(edge);
     edges.value.forEach(e => {
         if (chainIds.includes(e.id) && !e.selected) {
@@ -1128,18 +1734,22 @@ const applyTemplate = (layout, shape, edgeType) => {
     layoutNodes(layout); // this also commits history
 };
 
-// --- DAGRE AUTO-LAYOUT ---
-const layoutNodes = (direction = 'LR') => {
+// --- DAGRE / MINDMAP AUTO-LAYOUT ---
+const layoutNodes = (direction = 'RADIAL') => {
+    if (direction === 'RADIAL') {
+        calculateMindmapLayout();
+        return;
+    }
     
-    // Helper to run dagre on a set of nodes/edges
+    // Helper to run dagre on a set of nodes/edges for flowchart / logic chart modes
     const runDagre = (dir, nodesToLayout, edgesToLayout) => {
         const g = new dagre.graphlib.Graph();
-        g.setGraph({ rankdir: dir, nodesep: 50, ranksep: 100 });
+        g.setGraph({ rankdir: dir, nodesep: 40, ranksep: 120 });
         g.setDefaultEdgeLabel(() => ({}));
 
         nodesToLayout.forEach(node => {
-            const width = Math.max(150, (node.data.label?.length || 10) * 8);
-            g.setNode(node.id, { width, height: 60 });
+            const width = Math.max(140, (node.data.label?.length || 10) * 8);
+            g.setNode(node.id, { width, height: 50 });
         });
 
         edgesToLayout.forEach(edge => {
@@ -1157,94 +1767,22 @@ const layoutNodes = (direction = 'LR') => {
             return {
                 ...node,
                 position: {
-                    x: nodeWithPosition.x - nodeWithPosition.width / 2,
-                    y: nodeWithPosition.y - nodeWithPosition.height / 2
+                    x: Math.round(nodeWithPosition.x - nodeWithPosition.width / 2),
+                    y: Math.round(nodeWithPosition.y - nodeWithPosition.height / 2)
                 }
             };
         });
     };
 
-    let leftTreeIds = [];
-    let rightTreeIds = [];
-
-    if (direction === 'RADIAL') {
-        // Special Mindmap Layout (Root in center, branches split left and right)
-        const rootEdges = edges.value.filter(e => e.source === 'root');
-        
-        // Split children half left, half right
-        const rightChildIds = rootEdges.filter((e, i) => i % 2 === 0).map(e => e.target);
-        const leftChildIds = rootEdges.filter((e, i) => i % 2 !== 0).map(e => e.target);
-
-        // Helper to find all descendants
-        const getDescendants = (startIds) => {
-            let desc = [...startIds];
-            let added = true;
-            while(added) {
-                added = false;
-                const newChildren = edges.value.filter(e => desc.includes(e.source) && !desc.includes(e.target)).map(e => e.target);
-                if (newChildren.length > 0) {
-                    desc.push(...newChildren);
-                    added = true;
-                }
-            }
-            return desc;
-        };
-
-        rightTreeIds = ['root', ...getDescendants(rightChildIds)];
-        leftTreeIds = ['root', ...getDescendants(leftChildIds)];
-
-        const rightNodes = nodes.value.filter(n => rightTreeIds.includes(n.id));
-        const leftNodes = nodes.value.filter(n => leftTreeIds.includes(n.id));
-
-        const rightEdges = edges.value.filter(e => rightTreeIds.includes(e.source) && rightTreeIds.includes(e.target));
-        const leftEdges = edges.value.filter(e => leftTreeIds.includes(e.source) && leftTreeIds.includes(e.target));
-
-        const gRight = runDagre('LR', rightNodes, rightEdges);
-        const gLeft = runDagre('RL', leftNodes, leftEdges);
-
-        // Align left tree to match right tree's root Y position
-        const rightRoot = gRight.node('root');
-        const leftRoot = gLeft.node('root');
-        const yOffset = rightRoot.y - leftRoot.y;
-        
-        const positionedRight = applyPositions(rightNodes, gRight);
-        const positionedLeft = applyPositions(leftNodes, gLeft).map(n => {
-            if (n.id === 'root') return n; // Keep right root
-            return {
-                ...n,
-                position: {
-                    x: n.position.x - leftRoot.x - rightRoot.width, // shift to left of root
-                    y: n.position.y + yOffset
-                }
-            };
-        });
-
-        // Merge arrays without duplicating root
-        const mergedNodes = positionedRight.concat(positionedLeft.filter(n => n.id !== 'root'));
-        
-        // Any unconnected nodes just keep them as is
-        const connectedIds = [...rightTreeIds, ...leftTreeIds];
-        const unconnected = nodes.value.filter(n => !connectedIds.includes(n.id));
-        
-        nodes.value = [...mergedNodes, ...unconnected];
-
-    } else {
-        // Standard Tree Layout
-        const g = runDagre(direction, nodes.value, edges.value);
-        nodes.value = applyPositions(nodes.value, g);
-    }
+    const g = runDagre(direction, nodes.value, edges.value);
+    nodes.value = applyPositions(nodes.value, g);
 
     // UPDATE ALL EDGE HANDLES TO FIX ROUTING
     edges.value.forEach(edge => {
         let sHandle = 'source-right';
         let tHandle = 'target-left';
         
-        if (direction === 'RADIAL') {
-            if (leftTreeIds.includes(edge.target)) {
-                sHandle = 'source-left';
-                tHandle = 'target-right';
-            }
-        } else if (direction === 'RL') {
+        if (direction === 'RL') {
             sHandle = 'source-left';
             tHandle = 'target-right';
         } else if (direction === 'TB') {
@@ -1265,11 +1803,6 @@ const layoutNodes = (direction = 'LR') => {
 // --- AUTO SAVE ---
 let lastSavedData = '';
 
-const toast = ref({ show: false, message: '', type: 'success' });
-const showToast = (message, type = 'success') => {
-    toast.value = { show: true, message, type };
-    setTimeout(() => { toast.value.show = false; }, 3000);
-};
 
 const performSave = (isManual = false) => {
     if (!props.canEdit) return;
@@ -1368,37 +1901,40 @@ const handleEdgeMutated = () => {
     commitHistory();
 };
 
-const handleDeleteNode = (nodeId) => {
-    const node = getNodes.value.find(n => n.id === nodeId);
-    if (node && node.data?.shape === 'waypoint') {
-        const inEdge = getEdges.value.find(edg => edg.target === nodeId);
-        const outEdge = getEdges.value.find(edg => edg.source === nodeId);
+// --- ROOT DRAG MOVES ENTIRE TREE ---
+let lastRootPos = null;
+
+const onNodeDragStart = (event) => {
+    if (event.node.id === 'root' || event.node.data?.isRoot) {
+        lastRootPos = { x: event.node.position.x, y: event.node.position.y };
+    }
+};
+
+const onNodeDrag = (event) => {
+    if (event.node.id === 'root' || event.node.data?.isRoot) {
+        if (!lastRootPos) {
+            lastRootPos = { x: event.node.position.x, y: event.node.position.y };
+            return;
+        }
+        const dx = event.node.position.x - lastRootPos.x;
+        const dy = event.node.position.y - lastRootPos.y;
         
-        let newEdges = edges.value.filter(edg => edg.source !== nodeId && edg.target !== nodeId);
-        
-        if (inEdge && outEdge) {
-            newEdges.push({
-                id: `edge_${Date.now()}`,
-                source: inEdge.source,
-                target: outEdge.target,
-                sourceHandle: inEdge.sourceHandle,
-                targetHandle: outEdge.targetHandle,
-                type: inEdge.type,
-                animated: inEdge.animated,
-                class: inEdge.class,
-                style: { ...inEdge.style },
-                markerEnd: outEdge.markerEnd,
-                data: { 
-                    ...inEdge.data,
-                    arrow: outEdge.data?.arrow || inEdge.data?.arrow
+        if (dx !== 0 || dy !== 0) {
+            nodes.value.forEach(n => {
+                if (n.id !== event.node.id) {
+                    n.position = {
+                        x: n.position.x + dx,
+                        y: n.position.y + dy
+                    };
                 }
             });
+            lastRootPos = { x: event.node.position.x, y: event.node.position.y };
         }
-        edges.value = newEdges;
-        nodes.value = nodes.value.filter(n => n.id !== nodeId);
-    } else {
-        removeNodes([nodeId]);
     }
+};
+
+const onNodeDragStop = (event) => {
+    lastRootPos = null;
     commitHistory();
 };
 
@@ -1438,6 +1974,18 @@ const handleGlobalKeyDown = (e) => {
     }
     
     if (e.key === 'Delete' || e.key === 'Backspace') {
+        // Multi-node or single-node deletion
+        const selectedNodes = getSelectedNodes.value;
+        if (selectedNodes.length > 0) {
+            e.preventDefault();
+            handleDeleteNodes(selectedNodes.map(n => n.id));
+            return;
+        }
+
+        if (settings.value.diagramMode === 'mindmap') {
+            return;
+        }
+
         if (activeEdgeLabelId.value && activeEdge.value) {
             e.preventDefault();
             const edge = activeEdge.value;
@@ -1450,9 +1998,6 @@ const handleGlobalKeyDown = (e) => {
                 
                 commitHistory();
             }
-        } else if (activeNode.value) {
-            e.preventDefault();
-            handleDeleteNode(activeNode.value.id);
         } else if (activeEdge.value) {
             e.preventDefault();
             handleDeleteEdgeChain(activeEdge.value.id);
@@ -1463,6 +2008,9 @@ const handleGlobalKeyDown = (e) => {
 onMounted(() => {
     window.addEventListener('mindmap-edge-mutated', handleEdgeMutated);
     window.addEventListener('keydown', handleGlobalKeyDown);
+    window.addEventListener('mousedown', onGlobalMouseDown);
+    window.addEventListener('mousemove', onGlobalMouseMove);
+    window.addEventListener('mouseup', onGlobalMouseUp);
     
     // Set up auto-save interval (every 60 seconds)
     autoSaveInterval = setInterval(() => {
@@ -1473,83 +2021,193 @@ onMounted(() => {
 onUnmounted(() => {
     window.removeEventListener('mindmap-edge-mutated', handleEdgeMutated);
     window.removeEventListener('keydown', handleGlobalKeyDown);
+    window.removeEventListener('mousedown', onGlobalMouseDown);
+    window.removeEventListener('mousemove', onGlobalMouseMove);
+    window.removeEventListener('mouseup', onGlobalMouseUp);
     if (autoSaveInterval) clearInterval(autoSaveInterval);
 });
 </script>
 
 <template>
-    <component :is="props.canEdit ? AppLayout : 'div'" :title="props.canEdit ? title : undefined" :class="props.canEdit ? '' : 'h-screen w-screen overflow-hidden flex flex-col bg-gray-50'">
-        <template #header v-if="props.canEdit">
-            <div class="flex items-center justify-between w-full">
-                <div class="flex items-center">
-                    <input 
-                        v-if="isEditingTitle" v-model="title" @blur="updateTitle" @keyup.enter="updateTitle"
-                        class="font-semibold text-xl text-gray-800 border-b-2 border-blue-500 bg-transparent px-1 py-0 w-64 outline-none ring-0"
-                        autofocus
-                    />
-                    <h2 v-else @click="isEditingTitle = true" class="font-semibold text-xl text-gray-800 cursor-pointer hover:bg-gray-100 px-1 rounded transition-colors">
-                        {{ title }}
-                    </h2>
-                    
-                    <span class="ml-4 text-xs transition-opacity duration-300" :class="{
-                        'text-gray-400': saveState === '',
-                        'text-gray-500 italic': saveState === 'Unsaved changes',
-                        'text-blue-500 font-semibold animate-pulse': saveState === 'Saving...',
-                        'text-green-500 font-semibold': saveState === 'Saved',
-                        'text-red-500 font-semibold': saveState === 'Error saving'
-                    }">
-                        {{ saveState || 'Auto-saved' }}
-                    </span>
-                    
-                    <div class="ml-6 border-l pl-6 border-gray-300 flex items-center gap-2">
-                        <label class="text-xs font-semibold text-gray-500 uppercase tracking-wider">Mode</label>
-                        <select v-model="settings.diagramMode" class="text-sm bg-white border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 font-medium py-1">
-                            <option value="mindmap">🧠 Mindmap</option>
-                            <option value="flowchart">🔀 Flowchart</option>
-                            <option value="uml">📦 UML</option>
-                        </select>
+    <div class="h-screen w-screen overflow-hidden flex flex-col bg-white text-gray-800 select-none">
+        <Head :title="title ? `${title} - Talawire` : 'Mindmap Editor'" />
+
+        <!-- TOP NAVIGATION BAR (Xmind AI Minimalist Header) -->
+        <header class="h-12 border-b border-gray-100 bg-white flex items-center justify-between px-3 z-30 shrink-0 relative">
+            <!-- Left: Logo, Menu, Title, Breadcrumb & Save Status -->
+            <div class="flex items-center gap-2">
+                <!-- App Logo & Menu -->
+                <div class="relative">
+                    <button @click="isFileMenuOpen = !isFileMenuOpen" class="flex items-center gap-1.5 p-1 rounded-lg hover:bg-gray-100 text-gray-700 transition" title="Menu">
+                        <div class="w-6 h-6 rounded-md bg-gradient-to-tr from-purple-600 via-indigo-600 to-blue-500 flex items-center justify-center text-white shadow-xs">
+                            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="3"/><circle cx="19" cy="7" r="2"/><circle cx="5" cy="7" r="2"/><circle cx="19" cy="17" r="2"/><circle cx="5" cy="17" r="2"/><line x1="12" y1="9" x2="12" y2="6"/><line x1="12" y1="15" x2="12" y2="18"/><line x1="9.5" y1="10.5" x2="6.5" y2="8.5"/><line x1="14.5" y1="10.5" x2="17.5" y2="8.5"/><line x1="9.5" y1="13.5" x2="6.5" y2="15.5"/><line x1="14.5" y1="13.5" x2="17.5" y2="15.5"/></svg>
+                        </div>
+                        <svg class="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>
+                    </button>
+
+                    <!-- File Dropdown Menu -->
+                    <div v-if="isFileMenuOpen" @click.outside="isFileMenuOpen = false" class="absolute left-0 top-9 w-52 bg-white rounded-xl shadow-xl border border-gray-100 py-1.5 z-50 text-xs">
+                        <Link :href="route('dashboard')" class="w-full text-left px-3.5 py-2 hover:bg-gray-50 flex items-center gap-2 text-gray-700 font-medium">
+                            <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"></path></svg>
+                            Kembali ke Dashboard
+                        </Link>
+                        <div class="h-px bg-gray-100 my-1"></div>
+                        <div class="px-3.5 py-1 text-[10px] font-bold text-gray-400 uppercase tracking-wider">Mode Diagram</div>
+                        <button @click="settings.diagramMode = 'mindmap'; isFileMenuOpen = false;" :class="['w-full text-left px-3.5 py-1.5 hover:bg-gray-50 flex items-center justify-between text-xs', settings.diagramMode === 'mindmap' ? 'text-blue-600 font-bold' : 'text-gray-700']">
+                            <span>🧠 Mind Map</span>
+                            <span v-if="settings.diagramMode === 'mindmap'">✓</span>
+                        </button>
+                        <button @click="settings.diagramMode = 'flowchart'; isFileMenuOpen = false;" :class="['w-full text-left px-3.5 py-1.5 hover:bg-gray-50 flex items-center justify-between text-xs', settings.diagramMode === 'flowchart' ? 'text-blue-600 font-bold' : 'text-gray-700']">
+                            <span>🔀 Flowchart</span>
+                            <span v-if="settings.diagramMode === 'flowchart'">✓</span>
+                        </button>
+                        <button @click="settings.diagramMode = 'uml'; isFileMenuOpen = false;" :class="['w-full text-left px-3.5 py-1.5 hover:bg-gray-50 flex items-center justify-between text-xs', settings.diagramMode === 'uml' ? 'text-blue-600 font-bold' : 'text-gray-700']">
+                            <span>📦 UML Diagram</span>
+                            <span v-if="settings.diagramMode === 'uml'">✓</span>
+                        </button>
+                        <div class="h-px bg-gray-100 my-1"></div>
+                        <button @click="loadExampleMindmap(); isFileMenuOpen = false;" class="w-full text-left px-3.5 py-2 hover:bg-gray-50 flex items-center gap-2 text-gray-700">
+                            <svg class="w-4 h-4 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                            Muat Demo Mindmap
+                        </button>
                     </div>
                 </div>
-                
-                <div class="flex gap-2 text-sm">
-                    <button @click="undo" :disabled="!canUndo" :class="canUndo ? 'text-gray-700 hover:text-blue-600' : 'text-gray-300'" title="Undo (Ctrl+Z)">
-                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"></path></svg>
-                    </button>
-                    <button @click="redo" :disabled="!canRedo" :class="canRedo ? 'text-gray-700 hover:text-blue-600' : 'text-gray-300'" title="Redo (Ctrl+Y)">
-                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 10h-10a8 8 0 00-8 8v2M21 10l-6 6m6-6l-6-6"></path></svg>
-                    </button>
-                    
-                    <button @click="exportToPdf" :disabled="isExporting" class="ml-2 px-4 py-1.5 bg-gray-600 text-white text-sm font-medium rounded-md hover:bg-gray-700 transition shadow-sm flex items-center disabled:opacity-50">
-                        <svg v-if="isExporting" class="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                        </svg>
-                        <svg v-else class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
-                        {{ isExporting ? 'Exporting...' : 'Export PDF' }}
-                    </button>
-                    
-                    <button @click="exportToSvg" :disabled="isExporting" class="ml-2 px-4 py-1.5 bg-purple-600 text-white text-sm font-medium rounded-md hover:bg-purple-700 transition shadow-sm flex items-center disabled:opacity-50">
-                        <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                        Export Anim
-                    </button>
 
-                    <button @click="isVideoRecordModalOpen = true" :disabled="isRecording || isExporting" class="ml-2 px-4 py-1.5 bg-red-600 text-white text-sm font-medium rounded-md hover:bg-red-700 transition shadow-sm flex items-center disabled:opacity-50" title="Export MP4 di Server">
-                        <svg v-if="!isRecording" class="w-4 h-4 mr-1.5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-4-8c0-2.21 1.79-4 4-4s4 1.79 4 4-1.79 4-4 4-4-1.79-4-4z"/></svg>
-                        <svg v-else class="animate-spin w-4 h-4 mr-1.5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-                        {{ isRecording ? 'Rendering...' : 'Export Video' }}
-                    </button>
-                    
-                    <button v-if="props.canEdit" @click="isShareModalOpen = true" class="ml-2 px-4 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 transition shadow-sm flex items-center">
-                        <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"></path></svg>
-                        Share
-                    </button>
+                <!-- Title & Breadcrumb -->
+                <div class="flex flex-col justify-center">
+                    <div class="flex items-center gap-1.5">
+                        <input 
+                            v-if="isEditingTitle" v-model="title" @blur="updateTitle" @keyup.enter="updateTitle"
+                            class="font-semibold text-xs text-gray-900 border-b border-blue-500 bg-transparent px-0 py-0 outline-none ring-0 w-44"
+                            autofocus
+                        />
+                        <span v-else @click="isEditingTitle = true" class="font-bold text-xs text-gray-800 cursor-pointer hover:text-blue-600 transition truncate max-w-[180px]">
+                            {{ title || 'untitled' }}
+                        </span>
+
+                        <button @click="isFavorite = !isFavorite" class="text-gray-300 hover:text-amber-400 transition" :class="{ '!text-amber-400': isFavorite }" title="Favorite">
+                            <svg class="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>
+                        </button>
+                    </div>
+                    <div class="flex items-center gap-1 text-[10px] text-gray-400 leading-none">
+                        <Link :href="route('dashboard')" class="hover:text-gray-600">My Works</Link>
+                        <span>/</span>
+                        <span class="truncate max-w-[80px]">{{ saveState || 'Auto-saved' }}</span>
+                    </div>
                 </div>
             </div>
-        </template>
 
-        <div class="flex w-full border-t border-gray-200 bg-gray-200 h-[calc(100vh-130px)]">
-            <!-- SHAPE PALETTE (Only for Flowchart/UML) -->
-            <div v-if="props.canEdit && settings.diagramMode !== 'mindmap'" class="w-24 bg-gray-50 border-r border-gray-200 flex flex-col overflow-y-auto items-stretch z-10 shadow-sm">
+            <!-- Center: Floating Pill Toolbar (Xmind AI Toolbar) -->
+            <div class="hidden sm:flex items-center gap-1 bg-gray-50/90 border border-gray-200/80 rounded-full px-2 py-0.5 shadow-2xs">
+                <!-- Topic (Sibling) -->
+                <button @click="handleAddSibling(activeNode?.id || 'root')" class="p-1.5 hover:bg-white hover:shadow-xs rounded-full text-gray-600 hover:text-blue-600 transition" title="Tambah Topik Sejajar (Enter)">
+                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="8" width="18" height="8" rx="3"/><line x1="12" y1="4" x2="12" y2="8"/><line x1="12" y1="16" x2="12" y2="20"/></svg>
+                </button>
+
+                <!-- Subtopic (Child) -->
+                <button @click="handleAddChild(activeNode?.id || 'root')" class="p-1.5 hover:bg-white hover:shadow-xs rounded-full text-gray-600 hover:text-blue-600 transition" title="Tambah Subtopik Cabang (Tab)">
+                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="9" width="7" height="6" rx="2"/><path d="M10 12h5a3 3 0 013 3v2"/><rect x="15" y="17" width="6" height="5" rx="1.5"/></svg>
+                </button>
+
+                <!-- Relationship -->
+                <button @click="applyTemplate('RADIAL', 'pill', 'bezier')" class="p-1.5 hover:bg-white hover:shadow-xs rounded-full text-gray-600 hover:text-blue-600 transition" title="Garis Relasi Bezier">
+                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19C4 12 10 7 20 7"/><polyline points="15 3 20 7 15 11"/></svg>
+                </button>
+
+                <!-- Summary (Brace) -->
+                <button @click="applyTemplate('LR', 'box', 'brace')" class="p-1.5 hover:bg-white hover:shadow-xs rounded-full text-gray-600 hover:text-blue-600 transition" title="Brace Summary {">
+                    <span class="font-serif text-sm font-bold leading-none px-0.5">{ }</span>
+                </button>
+
+                <!-- Boundary / Group -->
+                <button @click="onDragStart($event, 'custom', 'group')" draggable="true" class="p-1.5 hover:bg-white hover:shadow-xs rounded-full text-gray-600 hover:text-blue-600 transition cursor-grab" title="Tarik Batas / Boundary Box">
+                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="3 3"><rect x="3" y="3" width="18" height="18" rx="4"/></svg>
+                </button>
+
+                <!-- Layout Toggle (Radial vs Tree) -->
+                <div class="relative">
+                    <button @click="isLayoutMenuOpen = !isLayoutMenuOpen" class="p-1.5 hover:bg-white hover:shadow-xs rounded-full text-gray-600 hover:text-blue-600 transition flex items-center gap-0.5" title="Ganti Tata Letak">
+                        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="6" height="6" rx="1"/><path d="M4 6h2v12H4M18 6h2v12h-2"/></svg>
+                        <svg class="w-2.5 h-2.5 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+                    </button>
+                    <div v-if="isLayoutMenuOpen" @click.outside="isLayoutMenuOpen = false" class="absolute left-1/2 -translate-x-1/2 top-9 w-40 bg-white rounded-xl shadow-xl border border-gray-100 py-1 z-50 text-xs">
+                        <button @click="layoutNodes('RADIAL'); isLayoutMenuOpen = false;" class="w-full text-left px-3 py-1.5 hover:bg-gray-50 flex items-center gap-2">
+                            <span>🧠 Radial Mindmap</span>
+                        </button>
+                        <button @click="layoutNodes('LR'); isLayoutMenuOpen = false;" class="w-full text-left px-3 py-1.5 hover:bg-gray-50 flex items-center gap-2">
+                            <span>➡️ Tree (Kiri-Kanan)</span>
+                        </button>
+                        <button @click="layoutNodes('TB'); isLayoutMenuOpen = false;" class="w-full text-left px-3 py-1.5 hover:bg-gray-50 flex items-center gap-2">
+                            <span>⬇️ Org Chart (Atas-Bawah)</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="h-3.5 w-px bg-gray-200 mx-0.5"></div>
+
+                <!-- Undo / Redo -->
+                <button @click="undo" :disabled="!canUndo" :class="canUndo ? 'text-gray-700 hover:text-blue-600 hover:bg-white' : 'text-gray-300 pointer-events-none'" class="p-1.5 rounded-full transition" title="Undo (Ctrl+Z)">
+                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"/></svg>
+                </button>
+                <button @click="redo" :disabled="!canRedo" :class="canRedo ? 'text-gray-700 hover:text-blue-600 hover:bg-white' : 'text-gray-300 pointer-events-none'" class="p-1.5 rounded-full transition" title="Redo (Ctrl+Y)">
+                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10h-10a8 8 0 00-8 8v2M21 10l-6 6m6-6l-6-6"/></svg>
+                </button>
+            </div>
+
+            <!-- Right: Account, Share, Presentation, Export, Format Panel -->
+            <div class="flex items-center gap-2">
+                <!-- User Avatar Initial -->
+                <div class="w-6 h-6 rounded-full bg-amber-400 text-amber-900 font-bold text-[11px] flex items-center justify-center shadow-2xs cursor-pointer" :title="$page.props.auth?.user?.name || 'User'">
+                    {{ ($page.props.auth?.user?.name || 'U').charAt(0).toUpperCase() }}
+                </div>
+
+                <!-- Share Button -->
+                <button v-if="props.canEdit" @click="isShareModalOpen = true" class="px-3.5 py-1 bg-gray-100 hover:bg-gray-200 text-gray-800 text-xs font-semibold rounded-full transition flex items-center gap-1 shadow-2xs">
+                    <svg class="w-3.5 h-3.5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"></path></svg>
+                    <span>Share</span>
+                </button>
+
+                <!-- Presentation Mode -->
+                <button @click="toggleFullscreen" class="p-1.5 hover:bg-gray-100 rounded-lg text-gray-600 hover:text-blue-600 transition" title="Presentation Mode (Fullscreen)">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+                </button>
+
+                <!-- Export Dropdown -->
+                <div class="relative">
+                    <button @click="isExportMenuOpen = !isExportMenuOpen" class="p-1.5 hover:bg-gray-100 rounded-lg text-gray-600 hover:text-blue-600 transition" title="Export File">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                    </button>
+                    <div v-if="isExportMenuOpen" @click.outside="isExportMenuOpen = false" class="absolute right-0 top-9 w-48 bg-white rounded-xl shadow-xl border border-gray-100 py-1.5 z-50 text-xs">
+                        <button @click="exportToPdf(); isExportMenuOpen = false;" class="w-full text-left px-3.5 py-2 hover:bg-gray-50 flex items-center gap-2 text-gray-700">
+                            <span class="w-2 h-2 rounded-full bg-red-500"></span>
+                            Export PDF Document
+                        </button>
+                        <button @click="exportToPng(); isExportMenuOpen = false;" class="w-full text-left px-3.5 py-2 hover:bg-gray-50 flex items-center gap-2 text-gray-700">
+                            <span class="w-2 h-2 rounded-full bg-blue-500"></span>
+                            Export PNG Image
+                        </button>
+                        <button @click="exportToSvg(); isExportMenuOpen = false;" class="w-full text-left px-3.5 py-2 hover:bg-gray-50 flex items-center gap-2 text-gray-700">
+                            <span class="w-2 h-2 rounded-full bg-purple-500"></span>
+                            Export Animated SVG
+                        </button>
+                        <button @click="isVideoRecordModalOpen = true; isExportMenuOpen = false;" class="w-full text-left px-3.5 py-2 hover:bg-gray-50 flex items-center gap-2 text-gray-700">
+                            <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+                            Export MP4 Video (Server)
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Format / Properties Sidebar Toggle -->
+                <button @click="isRightPanelOpen = !isRightPanelOpen" :class="['p-1.5 rounded-lg transition', isRightPanelOpen ? 'bg-blue-50 text-blue-600' : 'hover:bg-gray-100 text-gray-600']" title="Format Panel / Themes">
+                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M15 3v18"/></svg>
+                </button>
+            </div>
+        </header>
+
+        <!-- MAIN WORKSPACE (Full Bleed Clean Canvas) -->
+        <main class="flex-1 w-full relative overflow-hidden flex bg-white">
+            <!-- SHAPE PALETTE (Collapsible drawer for Flowchart/UML) -->
+            <div v-if="props.canEdit && settings.diagramMode !== 'mindmap'" class="w-24 bg-gray-50 border-r border-gray-100 flex flex-col overflow-y-auto items-stretch z-10 shadow-xs">
                 <!-- Basic Category -->
                 <div class="border-b border-gray-200">
                     <button @click="toggleCategory('basic')" class="w-full px-2 py-2 flex items-center justify-between bg-gray-100 hover:bg-gray-200 transition-colors">
@@ -1557,88 +2215,36 @@ onUnmounted(() => {
                         <svg :class="['w-3 h-3 text-gray-500 transition-transform', openCategories.basic ? 'rotate-180' : '']" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
                     </button>
                     <div v-show="openCategories.basic" class="flex flex-col items-center py-3 gap-3 bg-white">
-                        <!-- Text -->
-                        <div class="text-xl font-bold font-serif text-gray-700 cursor-grab hover:text-blue-500 hover:scale-110 transition-transform select-none" draggable="true" @dragstart="onDragStart($event, 'custom', 'text')" title="Teks Judul Singkat">T</div>
-                        <!-- Paragraph -->
-                        <div class="text-sm font-serif text-gray-700 cursor-grab hover:text-blue-500 hover:scale-110 transition-transform select-none" draggable="true" @dragstart="onDragStart($event, 'custom', 'paragraph')" title="Paragraf Panjang">P</div>
-                        <!-- Group / Area -->
-                        <div class="w-12 h-10 border-2 border-gray-400 border-dashed bg-gray-50 rounded cursor-grab hover:border-blue-500 hover:shadow relative flex items-center justify-center text-[10px] text-gray-400" draggable="true" @dragstart="onDragStart($event, 'custom', 'group')" title="Group / Background Area">Area</div>
-                        <!-- Callout -->
-                        <div draggable="true" @dragstart="onDragStart($event, 'custom', 'callout')" title="Callout / Speech Bubble" class="cursor-grab hover:shadow rounded">
-                            <svg class="w-12 h-10 pointer-events-none" viewBox="0 0 100 100" preserveAspectRatio="none">
-                                <path d="M 5,5 L 95,5 L 95,75 L 60,75 L 40,95 L 40,75 L 5,75 Z" fill="white" stroke="#9ca3af" stroke-width="2" vector-effect="non-scaling-stroke" />
-                            </svg>
-                        </div>
+                        <div class="text-xl font-bold font-serif text-gray-700 cursor-grab hover:text-blue-500 hover:scale-110 transition-transform select-none" draggable="true" @dragstart="onDragStart($event, 'custom', 'text')" title="Teks Judul">T</div>
+                        <div class="text-sm font-serif text-gray-700 cursor-grab hover:text-blue-500 hover:scale-110 transition-transform select-none" draggable="true" @dragstart="onDragStart($event, 'custom', 'paragraph')" title="Paragraf">P</div>
+                        <div class="w-12 h-10 border-2 border-gray-400 border-dashed bg-gray-50 rounded cursor-grab hover:border-blue-500 hover:shadow relative flex items-center justify-center text-[10px] text-gray-400" draggable="true" @dragstart="onDragStart($event, 'custom', 'group')" title="Group / Area">Area</div>
                     </div>
                 </div>
 
-                <!-- Flowchart Category -->
+                <!-- Flow Category -->
                 <div class="border-b border-gray-200">
                     <button @click="toggleCategory('flowchart')" class="w-full px-2 py-2 flex items-center justify-between bg-gray-100 hover:bg-gray-200 transition-colors">
                         <span class="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Flow</span>
                         <svg :class="['w-3 h-3 text-gray-500 transition-transform', openCategories.flowchart ? 'rotate-180' : '']" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
                     </button>
                     <div v-show="openCategories.flowchart" class="flex flex-col items-center py-3 gap-4 bg-white">
-                        <!-- Box -->
                         <div class="w-12 h-10 border-2 border-gray-400 bg-white rounded cursor-grab hover:border-blue-500 hover:shadow" draggable="true" @dragstart="onDragStart($event, 'custom', 'box')" title="Rectangle"></div>
-                        <!-- Pill -->
                         <div class="w-12 h-8 border-2 border-gray-400 bg-white rounded-full cursor-grab hover:border-blue-500 hover:shadow" draggable="true" @dragstart="onDragStart($event, 'custom', 'pill')" title="Start/End (Pill)"></div>
-                        <!-- Diamond -->
                         <div draggable="true" @dragstart="onDragStart($event, 'custom', 'diamond')" title="Decision (Diamond)" class="cursor-grab hover:shadow rounded">
-                            <svg class="w-10 h-10 pointer-events-none" viewBox="0 0 100 100" preserveAspectRatio="none">
-                                <polygon points="50,0 100,50 50,100 0,50" fill="white" stroke="#9ca3af" stroke-width="2" vector-effect="non-scaling-stroke" />
-                            </svg>
-                        </div>
-                        <!-- Parallelogram -->
-                        <div draggable="true" @dragstart="onDragStart($event, 'custom', 'parallelogram')" title="Data (Parallelogram)" class="cursor-grab hover:shadow rounded">
-                            <svg class="w-12 h-10 pointer-events-none" viewBox="0 0 100 100" preserveAspectRatio="none">
-                                <polygon points="15,0 100,0 85,100 0,100" fill="white" stroke="#9ca3af" stroke-width="2" vector-effect="non-scaling-stroke" />
-                            </svg>
-                        </div>
-                        <!-- Hexagon -->
-                        <div draggable="true" @dragstart="onDragStart($event, 'custom', 'hexagon')" title="Preparation (Hexagon)" class="cursor-grab hover:shadow rounded">
-                            <svg class="w-12 h-10 pointer-events-none" viewBox="0 0 100 100" preserveAspectRatio="none">
-                                <polygon points="25,0 75,0 100,50 75,100 25,100 0,50" fill="white" stroke="#9ca3af" stroke-width="2" vector-effect="non-scaling-stroke" />
-                            </svg>
-                        </div>
-                        <!-- Cylinder -->
-                        <div class="w-10 h-12 border-2 border-gray-400 bg-white cursor-grab hover:border-blue-500 hover:shadow" style="border-radius: 50% / 15%;" draggable="true" @dragstart="onDragStart($event, 'custom', 'cylinder')" title="Database"></div>
-                        <!-- Document -->
-                        <div draggable="true" @dragstart="onDragStart($event, 'custom', 'document')" title="Document" class="cursor-grab hover:shadow rounded">
-                            <svg class="w-12 h-10 pointer-events-none" viewBox="0 0 100 100" preserveAspectRatio="none">
-                                <polygon points="0,0 100,0 100,85 85,100 50,85 15,100 0,85" fill="white" stroke="#9ca3af" stroke-width="2" vector-effect="non-scaling-stroke" />
-                            </svg>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Media Category -->
-                <div>
-                    <button @click="toggleCategory('media')" class="w-full px-2 py-2 flex items-center justify-between bg-gray-100 hover:bg-gray-200 transition-colors">
-                        <span class="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Media</span>
-                        <svg :class="['w-3 h-3 text-gray-500 transition-transform', openCategories.media ? 'rotate-180' : '']" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
-                    </button>
-                    <div v-show="openCategories.media" class="flex flex-col items-center py-3 gap-4 bg-white">
-                        <!-- Emoji -->
-                        <div class="text-3xl cursor-grab hover:scale-110 transition-transform flex items-center justify-center w-12 h-12 bg-gray-50 border border-gray-200 rounded" draggable="true" @dragstart="onDragStart($event, 'custom', 'emoji', '😀')" title="Tarik untuk membuat node Emoji" v-html="defaultEmojiIcon"></div>
-                        
-                        <!-- Image Upload -->
-                        <div class="relative w-12 h-12 border-2 border-gray-400 border-dashed bg-white rounded cursor-pointer hover:border-blue-500 hover:bg-blue-50 flex items-center justify-center text-gray-400 hover:text-blue-500" title="Upload Image">
-                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
-                            <input type="file" accept="image/*" class="absolute inset-0 opacity-0 cursor-pointer" @change="uploadImageNode" />
+                            <svg class="w-10 h-10 pointer-events-none" viewBox="0 0 100 100" preserveAspectRatio="none"><polygon points="50,0 100,50 50,100 0,50" fill="white" stroke="#9ca3af" stroke-width="2" vector-effect="non-scaling-stroke" /></svg>
                         </div>
                     </div>
                 </div>
             </div>
 
-            <!-- CANVAS AREA -->
-            <div ref="canvasContainer" class="flex-grow relative overflow-hidden flex items-center justify-center bg-gray-200" @dragover.prevent @drop="onDrop" @contextmenu.prevent>
-                <div ref="whiteCanvasRef" :class="['relative overflow-hidden shadow-xl ring-1 ring-gray-900/5', settings.aspectRatio === 'auto' ? 'w-full h-full' : 'max-w-full max-h-full']" 
+            <!-- CANVAS AREA (Clean Pure White Surface) -->
+            <div ref="canvasContainer" class="flex-1 h-full w-full relative overflow-hidden bg-white" @dragover.prevent @drop="onDrop" @contextmenu.prevent>
+                <div ref="whiteCanvasRef" class="w-full h-full relative" 
                      :style="{ 
-                         backgroundColor: settings.backgroundColor,
+                         backgroundColor: settings.backgroundColor || '#ffffff',
                          aspectRatio: isRecording ? 'auto' : (settings.aspectRatio !== 'auto' ? settings.aspectRatio : 'auto'),
-                         height: isRecording ? recordingHeight : (settings.aspectRatio !== 'auto' ? '95%' : '100%'),
-                         width: isRecording ? recordingWidth : (settings.aspectRatio !== 'auto' ? 'auto' : '100%')
+                         height: isRecording ? recordingHeight : '100%',
+                         width: isRecording ? recordingWidth : '100%'
                      }">
                      
                     <!-- Custom SVG Markers -->
@@ -1672,15 +2278,17 @@ onUnmounted(() => {
 
                     <!-- Empty State / Example Loader -->
                     <div v-if="nodes.length === 0 && props.canEdit" class="absolute inset-0 z-10 flex flex-col items-center justify-center pointer-events-none">
-                        <div class="pointer-events-auto bg-white p-6 rounded-xl shadow-lg border border-gray-100 text-center max-w-sm">
-                            <div class="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4 text-blue-500">
-                                <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"></path></svg>
+                        <div class="pointer-events-auto bg-white p-6 rounded-2xl shadow-xl border border-gray-100 text-center max-w-sm">
+                            <div class="w-14 h-14 bg-gradient-to-tr from-purple-100 to-blue-100 rounded-2xl flex items-center justify-center mx-auto mb-4 text-purple-600">
+                                <svg class="w-7 h-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><circle cx="19" cy="7" r="2"/><circle cx="5" cy="7" r="2"/><circle cx="19" cy="17" r="2"/><circle cx="5" cy="17" r="2"/><line x1="12" y1="9" x2="12" y2="6"/><line x1="12" y1="15" x2="12" y2="18"/></svg>
                             </div>
-                            <h3 class="text-lg font-bold text-gray-800 mb-2">Kanvas Masih Kosong</h3>
-                            <p class="text-sm text-gray-500 mb-6">Tarik bentuk dari menu sebelah kiri untuk memulai, atau muat diagram contoh untuk mencoba fitur-fiturnya.</p>
-                            <button @click="loadExampleFlowchart" class="w-full py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-md text-sm font-semibold shadow-md hover:shadow-lg transition">
-                                Muat Contoh Flowchart
-                            </button>
+                            <h3 class="text-base font-bold text-gray-800 mb-1">Mulai Mindmap Baru</h3>
+                            <p class="text-xs text-gray-500 mb-5">Gunakan kanvas kosong untuk menuangkan ide atau muat contoh diagram.</p>
+                            <div class="flex flex-col gap-2 w-full">
+                                <button @click="loadExampleMindmap" class="w-full py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl text-xs font-semibold shadow-sm transition">
+                                    Muat Contoh Mindmap
+                                </button>
+                            </div>
                         </div>
                     </div>
                     
@@ -1697,121 +2305,134 @@ onUnmounted(() => {
                         @edge-click="onEdgeClick"
                         @edge-double-click="onEdgeDoubleClick"
                         @edge-context-menu="onEdgeContextMenu"
-                        class="h-full select-none transition-colors duration-300"
+                        class="h-full w-full select-none transition-colors duration-300"
                         :style="{ background: settings.backgroundColor || '#ffffff' }"
                         @pane-ready="onPaneReady"
                         @move-end="onMoveEnd"
                         @node-context-menu="onNodeContextMenu"
+                        @node-drag-start="onNodeDragStart"
+                        @node-drag="onNodeDrag"
+                        @node-drag-stop="onNodeDragStop"
                         :default-zoom="1" :min-zoom="0.2" :max-zoom="4"
                         :delete-key-code="[]"
                         :nodes-draggable="props.canEdit"
-                        :nodes-connectable="props.canEdit"
+                        :nodes-connectable="props.canEdit && settings.diagramMode !== 'mindmap'"
                         :elements-selectable="true"
+                        :edges-focusable="settings.diagramMode !== 'mindmap'"
+                        :edges-updatable="props.canEdit && settings.diagramMode !== 'mindmap'"
                         :selection-key-code="true"
-                        :pan-on-drag="true"
+                        :pan-on-drag="[1, 2]"
                         :zoom-on-scroll="true"
                         :zoom-on-pinch="true"
                         :zoom-on-double-click="false"
                         selection-mode="partial"
-                        @nodeDragStop="commitHistory"
-                        :edges-updatable="props.canEdit"
                         @edgeUpdateEnd="onEdgeUpdateEnd"
-                >
-                    <!-- Custom Nodes -->
-                    <template #node-custom="nodeProps">
-                        <MindmapNode v-bind="nodeProps" :can-edit="props.canEdit" @quick-connect="onQuickConnect" @resize-end="commitHistory" @content-changed="commitHistory" />
-                    </template>
+                    >
+                        <!-- Custom Nodes -->
+                        <template #node-custom="nodeProps">
+                            <MindmapNode v-bind="nodeProps" :can-edit="props.canEdit" @quick-connect="onQuickConnect" @resize-end="commitHistory" @content-changed="commitHistory" />
+                        </template>
 
-                    <!-- Custom Edges -->
-                    <template #edge-brace="edgeProps">
-                        <BraceEdge v-bind="edgeProps" />
-                    </template>
-                    <template #edge-step="edgeProps">
-                        <LabeledEdge v-bind="edgeProps" />
-                    </template>
-                    <template #edge-smoothstep="edgeProps">
-                        <LabeledEdge v-bind="edgeProps" />
-                    </template>
-                    <template #edge-bezier="edgeProps">
-                        <LabeledEdge v-bind="edgeProps" />
-                    </template>
-                    <template #edge-straight="edgeProps">
-                        <LabeledEdge v-bind="edgeProps" />
-                    </template>
+                        <!-- Custom Edges -->
+                        <template #edge-brace="edgeProps">
+                            <BraceEdge v-bind="edgeProps" />
+                        </template>
+                        <template #edge-step="edgeProps">
+                            <LabeledEdge v-bind="edgeProps" />
+                        </template>
+                        <template #edge-smoothstep="edgeProps">
+                            <LabeledEdge v-bind="edgeProps" />
+                        </template>
+                        <template #edge-bezier="edgeProps">
+                            <LabeledEdge v-bind="edgeProps" />
+                        </template>
+                        <template #edge-straight="edgeProps">
+                            <LabeledEdge v-bind="edgeProps" />
+                        </template>
+                        
+                        <Background :pattern-color="['#1e293b', '#0f172a', '#111827'].some(c => (settings.backgroundColor || '').includes(c)) ? '#475569' : '#e2e8f0'" 
+                            :variant="settings.backgroundStyle" gap="20" size="1.5" v-if="settings.backgroundStyle && settings.backgroundStyle !== 'none'" />
+                    </VueFlow>
                     
-                    <Background :pattern-color="['#1e293b', '#0f172a', '#111827'].some(c => (settings.backgroundColor || '').includes(c)) || (settings.backgroundColor || '').includes('1e3c72') ? '#475569' : '#cbd5e1'" 
-                        :variant="settings.backgroundStyle" gap="20" size="1.5" v-if="settings.backgroundStyle !== 'none'" />
-                    <Controls position="bottom-left" v-if="props.canEdit && settings.showControls !== false" />
-                    <MiniMap position="bottom-right" class="!mb-0" v-if="props.canEdit && settings.showMinimap !== false" />
-                </VueFlow>
-                
-                <!-- Context Menu -->
-                <div v-if="contextMenu.show" :style="{ top: contextMenu.y + 'px', left: contextMenu.x + 'px' }" class="fixed z-[100] bg-white border border-gray-200 shadow-xl rounded-md py-1 w-48 transform -translate-y-2">
-                    <template v-if="contextMenu.nodeId">
-                        <button @click="cloneNode(contextMenu.nodeId)" class="w-full text-left px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 flex items-center transition-colors">
-                            <svg class="w-4 h-4 mr-2.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
-                            Duplikat (Clone)
-                        </button>
-                        <div class="h-px bg-gray-200 my-1"></div>
-                        <button @click="handleDeleteNode(contextMenu.nodeId); closeContextMenu();" class="w-full text-left px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 flex items-center transition-colors">
-                            <svg class="w-4 h-4 mr-2.5 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                            Hapus Node
-                        </button>
-                    </template>
-                    <template v-if="contextMenu.edgeId">
-                        <button @click="addWaypointFromContext" class="w-full text-left px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 flex items-center transition-colors">
-                            <svg class="w-4 h-4 mr-2.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path></svg>
-                            Tambah Titik Belok
-                        </button>
-                        <div class="h-px bg-gray-200 my-1"></div>
-                        <button @click="handleDeleteEdgeChain(contextMenu.edgeId); closeContextMenu();" class="w-full text-left px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 flex items-center transition-colors">
-                            <svg class="w-4 h-4 mr-2.5 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                            Hapus Garis
-                        </button>
-                    </template>
-                </div>
+                    <!-- Context Menu -->
+                    <div v-if="contextMenu.show" :style="{ top: contextMenu.y + 'px', left: contextMenu.x + 'px' }" class="fixed z-[100] bg-white border border-gray-100 shadow-xl rounded-xl py-1 w-44 transform -translate-y-2 text-xs">
+                        <template v-if="contextMenu.nodeId">
+                            <button @click="cloneNode(contextMenu.nodeId)" class="w-full text-left px-3.5 py-2 font-medium text-gray-700 hover:bg-gray-50 flex items-center transition-colors">
+                                <svg class="w-4 h-4 mr-2 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+                                Duplikat Topik
+                            </button>
+                            <div class="h-px bg-gray-100 my-1"></div>
+                            <button @click="handleDeleteNode(contextMenu.nodeId); closeContextMenu();" class="w-full text-left px-3.5 py-2 font-medium text-red-600 hover:bg-red-50 flex items-center transition-colors">
+                                <svg class="w-4 h-4 mr-2 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                                Hapus
+                            </button>
+                        </template>
+                        <template v-if="contextMenu.edgeId && settings.diagramMode !== 'mindmap'">
+                            <button @click="addWaypointFromContext" class="w-full text-left px-3.5 py-2 font-medium text-gray-700 hover:bg-gray-50 flex items-center transition-colors">
+                                <svg class="w-4 h-4 mr-2 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path></svg>
+                                Tambah Titik Belok
+                            </button>
+                            <div class="h-px bg-gray-100 my-1"></div>
+                            <button @click="handleDeleteEdgeChain(contextMenu.edgeId); closeContextMenu();" class="w-full text-left px-3.5 py-2 font-medium text-red-600 hover:bg-red-50 flex items-center transition-colors">
+                                <svg class="w-4 h-4 mr-2 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                                Hapus Garis
+                            </button>
+                        </template>
+                    </div>
                 </div>
             </div>
 
-            <!-- RIGHT PROPERTIES SIDEBAR -->
-            <div v-show="props.canEdit" class="w-72 bg-gray-50 border-l flex flex-col shadow-inner z-10 hidden md:flex">
+            <!-- OUTLINER SLIDE-OVER DRAWER -->
+            <div v-if="isOutlinerOpen" class="w-72 bg-white border-l border-gray-100 flex flex-col z-20 shadow-lg text-xs">
+                <div class="h-10 border-b border-gray-100 px-4 flex items-center justify-between font-bold text-gray-700">
+                    <span>Outliner</span>
+                    <button @click="isOutlinerOpen = false" class="text-gray-400 hover:text-gray-600">✕</button>
+                </div>
+                <div class="p-3 overflow-y-auto flex-1 space-y-1.5">
+                    <div v-for="node in nodes" :key="node.id" 
+                         @click="getNodes.forEach(n => n.selected = (n.id === node.id))" 
+                         :class="['px-2.5 py-1.5 rounded-lg cursor-pointer transition flex items-center gap-2', node.id === activeNode?.id ? 'bg-blue-50 text-blue-700 font-bold' : 'hover:bg-gray-50 text-gray-700']"
+                         :style="{ paddingLeft: (node.id === 'root' ? 8 : (node.data?.shape === 'underline' ? 24 : 14)) + 'px' }">
+                        <span class="w-2 h-2 rounded-full shrink-0" :style="{ backgroundColor: node.data?.bgColor || node.data?.branchLineColor || '#38bdf8' }"></span>
+                        <span class="truncate">{{ node.data?.label || (node.id === 'root' ? 'Central Topic' : 'Node') }}</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- RIGHT PROPERTIES / THEME SIDEBAR -->
+            <div v-if="isRightPanelOpen && props.canEdit" class="w-72 bg-white border-l border-gray-100 flex flex-col z-20 shadow-lg">
                 <!-- PANEL HEADER -->
-                <div class="h-14 border-b bg-white flex items-center px-4 shrink-0 shadow-sm">
-                    <h3 class="font-bold text-gray-700 tracking-wide text-sm flex items-center">
-                        <svg v-if="activeSelectionType === 'none'" class="w-4 h-4 mr-2 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
-                        <svg v-else class="w-4 h-4 mr-2 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"></path></svg>
-                        {{ activeSelectionType === 'node' && activeNode?.id === 'root' ? 'Premium Themes' : (activeSelectionType === 'node' ? 'Node Properties' : (activeSelectionType === 'edge' ? (activeEdgeLabelId ? 'Text Properties' : 'Line Properties') : 'Canvas Settings')) }}
+                <div class="h-10 border-b border-gray-100 flex items-center justify-between px-4 shrink-0">
+                    <h3 class="font-bold text-gray-700 text-xs flex items-center">
+                        {{ activeSelectionType === 'node' && activeNode?.id === 'root' ? 'Themes & Layout' : (activeSelectionType === 'node' ? 'Topic Properties' : (activeSelectionType === 'edge' ? 'Line Properties' : 'Canvas Settings')) }}
                     </h3>
+                    <button @click="isRightPanelOpen = false" class="text-gray-400 hover:text-gray-600 text-xs">✕</button>
                 </div>
                 
-                <div class="p-4 flex flex-col gap-6 overflow-y-auto">
-                    
-                    <!-- PREMIUM THEMES & LAYOUT (ONLY VISIBLE ON ROOT NODE) -->
+                <div class="p-4 flex flex-col gap-4 overflow-y-auto text-xs flex-1">
+                    <!-- PREMIUM THEMES & LAYOUT -->
                     <template v-if="activeSelectionType === 'node' && activeNode?.id === 'root'">
                         <div>
-                            <label class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3 block">Layout Templates</label>
-                            
-                            <div v-for="category in templateCategories" :key="category.name" class="mb-4">
-                                <div class="text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-2 flex items-center">
-                                    <span class="mr-1">▼</span> {{ category.name }}
+                            <label class="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2 block">Layout Templates</label>
+                            <div v-for="category in templateCategories" :key="category.name" class="mb-3">
+                                <div class="text-[9px] font-bold text-gray-400 uppercase tracking-wide mb-1.5 flex items-center">
+                                    {{ category.name }}
                                 </div>
-                                <div class="grid grid-cols-2 gap-2">
+                                <div class="grid grid-cols-2 gap-1.5">
                                     <button v-for="tpl in category.templates" :key="tpl.name" @click="applyTemplate(tpl.layout, tpl.shape, tpl.edge)" 
-                                            class="py-2 px-2 bg-white border border-gray-200 rounded-md text-xs font-medium text-gray-600 hover:bg-blue-50 hover:border-blue-300 hover:text-blue-700 shadow-sm flex items-center justify-center gap-1 transition-all">
-                                        <span class="text-gray-400 text-lg leading-none" v-if="tpl.icon !== 'M'">{{ tpl.icon }}</span>
-                                        <svg v-if="tpl.icon === 'M'" class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 10l-2 1m0 0l-2-1m2 1v2.5M20 7l-2 1m2-1l-2-1m2 1v2.5M14 4l-2-1-2 1M4 7l2-1M4 7l2 1M4 7v2.5M14 16l-2-1m0 0l-2 1m2-1v2.5"></path></svg>
-                                        {{ tpl.name }}
+                                            class="py-1.5 px-2 bg-gray-50 hover:bg-blue-50 border border-gray-200/80 rounded-lg text-xs font-medium text-gray-700 hover:text-blue-700 transition flex items-center justify-center gap-1">
+                                        <span>{{ tpl.name }}</span>
                                     </button>
                                 </div>
                             </div>
                             
-                            <hr class="my-5 border-gray-200" />
+                            <hr class="my-4 border-gray-100" />
 
-                            <label class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3 block">Node & Line Themes</label>
-                            <div class="grid grid-cols-2 gap-3">
-                                <button v-for="(t, key) in themes" :key="key" @click="applyTheme(key)" class="group flex flex-col items-center gap-2">
-                                    <div class="w-full h-16 rounded-md border-2 transition-transform transform group-hover:scale-105" :class="t.previewClass"></div>
-                                    <span class="text-[10px] font-bold text-gray-600 uppercase tracking-wide text-center leading-tight">{{ t.name }}</span>
+                            <label class="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2 block">Color Themes</label>
+                            <div class="grid grid-cols-2 gap-2">
+                                <button v-for="(t, key) in themes" :key="key" @click="applyTheme(key)" class="group flex flex-col items-center gap-1">
+                                    <div class="w-full h-10 rounded-lg border transition-transform group-hover:scale-105" :class="t.previewClass"></div>
+                                    <span class="text-[10px] font-medium text-gray-600 text-center">{{ t.name }}</span>
                                 </button>
                             </div>
                         </div>
@@ -1819,263 +2440,132 @@ onUnmounted(() => {
 
                     <!-- NODE PROPERTIES -->
                     <template v-else-if="activeSelectionType === 'node' && activeNode">
-                        <div class="mb-4">
-                            <label class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 block">Layer Order</label>
-                            <div class="flex gap-2">
-                                <button @click="updateNodeZIndex(1)" class="flex-1 py-1.5 bg-white border border-gray-300 rounded text-sm text-gray-600 hover:bg-gray-50 transition shadow-sm flex items-center justify-center gap-1" title="Bring to Front">
-                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 11l7-7 7 7M5 19l7-7 7 7"></path></svg>
-                                    Front
-                                </button>
-                                <button @click="updateNodeZIndex(-1)" class="flex-1 py-1.5 bg-white border border-gray-300 rounded text-sm text-gray-600 hover:bg-gray-50 transition shadow-sm flex items-center justify-center gap-1" title="Send to Back">
-                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 13l-7 7-7-7m14-8l-7 7-7-7"></path></svg>
-                                    Back
+                        <div>
+                            <label class="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2 block">Shape / Gaya Topik</label>
+                            <div class="grid grid-cols-2 gap-1.5 mb-3">
+                                <button v-for="s in [
+                                    { id: 'pill', label: 'Pill (Kapsul)' },
+                                    { id: 'box', label: 'Kotak (Rounded)' },
+                                    { id: 'underline', label: 'Garis (Underline)' },
+                                    { id: 'transparent', label: 'Tanpa Kotak' }
+                                ]" :key="s.id"
+                                    @click="updateNodeProperty('shape', s.id)"
+                                    class="py-1.5 px-2 text-xs font-medium border rounded-lg transition shadow-2xs text-center"
+                                    :class="(activeNode.data?.shape || 'pill') === s.id ? 'bg-blue-50 border-blue-400 text-blue-700 font-bold' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'">
+                                    {{ s.label }}
                                 </button>
                             </div>
                         </div>
 
-                        <div v-if="activeNode.data.shape === 'group'" class="mb-4 bg-gray-100 p-3 rounded-md">
-                            <label class="flex items-center cursor-pointer">
-                                <input type="checkbox" :checked="activeNode.data.isBorderOnly" @change="updateNodeProperty('isBorderOnly', $event.target.checked)" class="rounded text-blue-600 focus:ring-blue-500 border-gray-300 mr-2" />
-                                <span class="text-sm text-gray-700 font-medium">Border Only (Transparent)</span>
-                            </label>
+                        <div>
+                            <label class="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2 block">Sambungan Garis</label>
+                            <div class="grid grid-cols-2 gap-1.5 mb-3">
+                                <button @click="updateNodeProperty('anchorPosition', 'center')" 
+                                        class="py-1.5 px-2 text-xs font-medium border rounded-lg transition shadow-2xs text-center"
+                                        :class="(activeNode.data?.anchorPosition || 'center') === 'center' ? 'bg-blue-50 border-blue-400 text-blue-700 font-bold' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'">
+                                    Tengah (XMind)
+                                </button>
+                                <button @click="updateNodeProperty('anchorPosition', 'bottom')" 
+                                        class="py-1.5 px-2 text-xs font-medium border rounded-lg transition shadow-2xs text-center"
+                                        :class="activeNode.data?.anchorPosition === 'bottom' ? 'bg-blue-50 border-blue-400 text-blue-700 font-bold' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'">
+                                    Bawah (Underline)
+                                </button>
+                            </div>
                         </div>
-                        <div v-if="activeNode.data.shape === 'text' || activeNode.data.shape === 'group'">
-                            <label class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 block">Font Family</label>
-                            <select :value="activeNode.data.fontFamily || 'Inter'" @change="updateNodeProperty('fontFamily', $event.target.value)" class="w-full text-sm bg-white border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 mb-4">
-                                <option value="Inter">Inter (Sans)</option>
-                                <option value="serif">Serif</option>
-                                <option value="monospace">Monospace</option>
-                                <option value="'Comic Sans MS', cursive">Comic Sans</option>
-                                <option value="Impact, sans-serif">Impact</option>
-                            </select>
-                        </div>
-                        <div v-if="activeNode.data.shape !== 'text' && !(activeNode.data.shape === 'group' && activeNode.data.isBorderOnly)">
-                            <label class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 block">Background Color</label>
-                            <div class="flex flex-wrap gap-2">
-                                <button v-for="c in ['#ffffff', '#fef2f2', '#fffbeb', '#f0fdf4', '#eff6ff', '#f3e8ff', '#f1f5f9']" 
-                                    @click="updateNodeProperty('bgColor', c)" 
-                                    class="w-8 h-8 rounded border transition hover:scale-110 shadow-sm"
-                                    :class="activeNode.data.bgColor === c ? 'ring-2 ring-offset-1 ring-blue-500' : 'border-gray-200'"
+
+                        <div v-if="activeNode.data?.shape !== 'underline' && activeNode.data?.shape !== 'transparent'">
+                            <label class="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2 block">Warna Background Topik</label>
+                            <div class="flex flex-wrap gap-2 mb-3">
+                                <button v-for="c in ['#ffffff', '#ff6b6b', '#ff9f43', '#55efc4', '#81ecec', '#74b9ff', '#a29bfe', '#fab1a0', '#fd79a8', '#dfe6e9', '#2d3436']" :key="c"
+                                    @click="updateNodeProperty('bgColor', c); if(c === '#ffffff') updateNodeProperty('color', '#1e293b'); else if(['#ff6b6b','#2d3436','#74b9ff','#a29bfe'].includes(c)) updateNodeProperty('color', '#ffffff');"
+                                    class="w-6 h-6 rounded-full border border-gray-200 transition hover:scale-110 shadow-xs"
+                                    :class="(activeNode.data?.bgColor || '#ffffff') === c ? 'ring-2 ring-offset-1 ring-blue-500' : ''"
                                     :style="{ backgroundColor: c }">
                                 </button>
                             </div>
                         </div>
 
-                        <!-- BORDER SETTINGS -->
-                        <div v-if="activeNode.data.shape !== 'text' && activeNode.data.shape !== 'image' && activeNode.data.shape !== 'emoji'">
-                            <label class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 block">Border Properties</label>
-                            
-                            <div class="flex gap-2 mb-3">
-                                <button @click="updateNodeProperty('borderStyle', 'solid')" class="flex-1 py-1.5 border rounded text-xs transition shadow-sm"
-                                        :class="(activeNode.data.borderStyle === 'solid' || !activeNode.data.borderStyle) ? 'bg-blue-50 border-blue-400 text-blue-700' : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'">
-                                    Solid
-                                </button>
-                                <button @click="updateNodeProperty('borderStyle', 'dashed')" class="flex-1 py-1.5 border rounded text-xs transition shadow-sm"
-                                        :class="(activeNode.data.borderStyle === 'dashed') ? 'bg-blue-50 border-blue-400 text-blue-700' : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'">
-                                    Dashed
-                                </button>
-                                <button @click="updateNodeProperty('borderStyle', 'dotted')" class="flex-1 py-1.5 border rounded text-xs transition shadow-sm"
-                                        :class="(activeNode.data.borderStyle === 'dotted') ? 'bg-blue-50 border-blue-400 text-blue-700' : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'">
-                                    Dotted
-                                </button>
-                                <button @click="updateNodeProperty('borderWidth', 0)" class="flex-1 py-1.5 border rounded text-xs transition shadow-sm"
-                                        :class="(activeNode.data.borderWidth === 0) ? 'bg-red-50 border-red-400 text-red-700' : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'">
-                                    None
-                                </button>
-                            </div>
-                            
-                            <div class="mb-3" v-if="activeNode.data.borderWidth !== 0">
-                                <div class="flex justify-between items-center mb-1">
-                                    <span class="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Thickness</span>
-                                    <span class="text-xs text-gray-500">{{ activeNode.data.borderWidth !== undefined ? activeNode.data.borderWidth : 2 }}px</span>
-                                </div>
-                                <input type="range" min="1" max="10" :value="activeNode.data.borderWidth !== undefined ? activeNode.data.borderWidth : 2" @input="updateNodeProperty('borderWidth', parseInt($event.target.value))" class="w-full text-blue-500 h-1" />
-                            </div>
-
-                            <div class="mb-3" v-if="activeNode.data.borderWidth !== 0">
-                                <span class="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-2 block">Border Color</span>
-                                <div class="flex flex-wrap gap-2">
-                                    <button v-for="c in ['#e5e7eb', '#94a3b8', '#ef4444', '#f59e0b', '#10b981', '#3b82f6', '#8b5cf6', '#0f172a']" 
-                                        @click="updateNodeProperty('borderColor', c)" 
-                                        class="w-5 h-5 rounded border border-gray-200 transition hover:scale-125 shadow-sm"
-                                        :class="activeNode.data.borderColor === c ? 'ring-2 ring-offset-1 ring-blue-500' : ''"
-                                        :style="{ backgroundColor: c }">
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- NODE ANIMATION -->
-                        <div v-if="activeNode.data.shape !== 'emoji'" class="mb-4">
-                            <label class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 block">Animasi (Animate.css)</label>
-                            <select :value="activeNode.data.animation || ''" @change="updateNodeProperty('animation', $event.target.value)" class="w-full text-sm bg-white border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500">
-                                <option value="">Tidak ada (None)</option>
-                                <option value="bounce">Bounce</option>
-                                <option value="flash">Flash</option>
-                                <option value="pulse">Pulse</option>
-                                <option value="rubberBand">RubberBand</option>
-                                <option value="shakeX">Shake X</option>
-                                <option value="shakeY">Shake Y</option>
-                                <option value="headShake">HeadShake</option>
-                                <option value="swing">Swing</option>
-                                <option value="tada">Tada</option>
-                                <option value="wobble">Wobble</option>
-                                <option value="jello">Jello</option>
-                                <option value="heartBeat">HeartBeat</option>
-                            </select>
-                        </div>
-
-                        <!-- EMOJI PICKER IN NODE SETTINGS -->
-                        <div v-if="activeNode.data.shape === 'emoji'" class="mb-4">
-                            <label class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 block">Pilih Emoji</label>
-                            <EmojiPicker :native="false" @select="updateNodeProperty('emoji', $event.i)" class="max-w-full" />
-                        </div>
                         <div>
-                            <label class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 block">Text Color</label>
-                            <div class="flex flex-wrap gap-2">
-                                <button v-for="c in ['#111827', '#ef4444', '#f59e0b', '#10b981', '#3b82f6', '#8b5cf6', '#64748b']" 
-                                    @click="updateNodeProperty('textColor', c)" 
-                                    class="w-6 h-6 rounded-full border border-transparent transition hover:scale-110 shadow-sm"
-                                    :class="activeNode.data.textColor === c ? 'ring-2 ring-offset-1 ring-blue-500' : ''"
+                            <label class="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2 block">Warna Cabang (Branch Line)</label>
+                            <div class="flex flex-wrap gap-2 mb-3">
+                                <button v-for="c in ['#ff7675', '#e17055', '#fdcb6e', '#00b894', '#00cec9', '#0984e3', '#6c5ce7', '#e84393', '#636e72', '#2d3436']" :key="c"
+                                    @click="updateNodeProperty('branchLineColor', c)"
+                                    class="w-6 h-6 rounded-full border border-gray-200 transition hover:scale-110 shadow-xs"
+                                    :class="(activeNode.data?.branchLineColor || '') === c ? 'ring-2 ring-offset-1 ring-blue-500' : ''"
                                     :style="{ backgroundColor: c }">
                                 </button>
                             </div>
                         </div>
+
                         <div>
-                            <label class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 block">Text Size</label>
-                            <input type="range" min="10" max="32" :value="activeNode.data.fontSize || 14" @input="updateNodeProperty('fontSize', parseInt($event.target.value))" class="w-full text-blue-500" />
-                            <div class="text-right text-xs text-gray-500 mt-1">{{ activeNode.data.fontSize || 14 }}px</div>
+                            <label class="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2 block">Warna Teks</label>
+                            <div class="flex flex-wrap gap-2 mb-3">
+                                <button v-for="c in ['#111827', '#ffffff', '#374151', '#4b5563', '#6b7280', '#0284c7', '#059669', '#dc2626']" :key="'tc'+c"
+                                    @click="updateNodeProperty('color', c)"
+                                    class="w-6 h-6 rounded-full border border-gray-200 transition hover:scale-110 shadow-xs"
+                                    :class="(activeNode.data?.color || '#111827') === c ? 'ring-2 ring-offset-1 ring-blue-500' : ''"
+                                    :style="{ backgroundColor: c }">
+                                </button>
+                            </div>
+                        </div>
+
+                        <div>
+                            <label class="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1 block">Ukuran Teks</label>
+                            <input type="range" min="10" max="32" :value="activeNode.data?.fontSize || 14" @input="updateNodeProperty('fontSize', parseInt($event.target.value))" class="w-full text-blue-500" />
+                            <div class="text-right text-[10px] text-gray-400 mt-1">{{ activeNode.data?.fontSize || 14 }}px</div>
                         </div>
                     </template>
 
                     <!-- EDGE PROPERTIES -->
-                    <template v-else-if="activeSelectionType === 'edge' && activeEdge && !activeEdgeLabelId">
-                        <div class="mb-4 flex gap-2">
-                            <button @click="addEdgeLabel" class="flex-1 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 text-sm font-semibold rounded-lg shadow-sm border border-blue-200 transition-colors flex items-center justify-center">
-                                <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
-                                Tambah Teks
-                            </button>
-                        </div>
-                        <div class="mb-4">
-                            <label class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 block">Text Style</label>
-                            <div class="flex gap-2">
-                                <button @click="updateEdgeProperty('labelRotation', 'horizontal')" class="flex-1 py-1.5 border rounded text-sm transition shadow-sm"
-                                        :class="(activeEdge.data?.labelRotation !== 'follow') ? 'bg-blue-50 border-blue-400 text-blue-700' : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'">
-                                    Horizontal
-                                </button>
-                                <button @click="updateEdgeProperty('labelRotation', 'follow')" class="flex-1 py-1.5 border rounded text-sm transition shadow-sm"
-                                        :class="(activeEdge.data?.labelRotation === 'follow') ? 'bg-blue-50 border-blue-400 text-blue-700' : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'">
-                                    Follow Line
-                                </button>
-                            </div>
-                        </div>
+                    <template v-else-if="activeSelectionType === 'edge' && activeEdge && !activeEdgeLabel">
                         <div>
-                            <label class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 block">Line Color</label>
-                            <div class="flex flex-wrap gap-2">
-                                <button v-for="c in ['#94a3b8', '#ef4444', '#f59e0b', '#10b981', '#3b82f6', '#8b5cf6', '#0f172a']" 
+                            <label class="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2 block">Warna Garis</label>
+                            <div class="flex flex-wrap gap-2 mb-3">
+                                <button v-for="c in ['#94a3b8', '#ff7675', '#e17055', '#fdcb6e', '#00b894', '#00cec9', '#0984e3', '#6c5ce7', '#e84393', '#2d3436']" 
                                     @click="updateEdgeProperty('color', c)" 
-                                    class="w-6 h-6 rounded-full border transition hover:scale-110 shadow-sm"
+                                    class="w-6 h-6 rounded-full border transition hover:scale-110 shadow-xs"
                                     :class="activeEdge.style?.stroke === c ? 'ring-2 ring-offset-1 ring-blue-500' : 'border-transparent'"
                                     :style="{ backgroundColor: c }">
                                 </button>
                             </div>
                         </div>
                         <div>
-                            <label class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 block">Ketebalan Garis (Width)</label>
+                            <label class="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1 block">Ketebalan Garis</label>
                             <input type="range" min="1" max="10" :value="activeEdge.style?.strokeWidth || 2" @input="updateEdgeProperty('width', parseInt($event.target.value))" class="w-full text-blue-500" />
-                            <div class="text-right text-xs text-gray-500 mt-1">{{ activeEdge.style?.strokeWidth || 2 }}px</div>
+                            <div class="text-right text-[10px] text-gray-400 mt-1">{{ activeEdge.style?.strokeWidth || 2 }}px</div>
                         </div>
 
                         <div>
-                            <label class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 block">Pola Garis (Pattern)</label>
-                            <div class="flex gap-2">
-                                <button @click="updateEdgeProperty('pattern', 'solid')" class="flex-1 py-1.5 border rounded text-sm transition shadow-sm"
-                                        :class="(activeEdge.data?.pattern || 'solid') === 'solid' ? 'bg-blue-50 border-blue-400 text-blue-700' : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'">
+                            <label class="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2 block">Pola Garis</label>
+                            <div class="flex gap-2 mb-3">
+                                <button @click="updateEdgeProperty('pattern', 'solid')" class="flex-1 py-1.5 border rounded-lg text-xs transition shadow-2xs"
+                                        :class="(activeEdge.data?.pattern || 'solid') === 'solid' ? 'bg-blue-50 border-blue-400 text-blue-700 font-bold' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'">
                                     Solid
                                 </button>
-                                <button @click="updateEdgeProperty('pattern', 'dashed')" class="flex-1 py-1.5 border rounded text-sm transition shadow-sm"
-                                        :class="(activeEdge.data?.pattern === 'dashed') ? 'bg-blue-50 border-blue-400 text-blue-700' : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'">
+                                <button @click="updateEdgeProperty('pattern', 'dashed')" class="flex-1 py-1.5 border rounded-lg text-xs transition shadow-2xs"
+                                        :class="(activeEdge.data?.pattern === 'dashed') ? 'bg-blue-50 border-blue-400 text-blue-700 font-bold' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'">
                                     Dashed
                                 </button>
-                                <button @click="updateEdgeProperty('pattern', 'dotted')" class="flex-1 py-1.5 border rounded text-sm transition shadow-sm"
-                                        :class="(activeEdge.data?.pattern === 'dotted') ? 'bg-blue-50 border-blue-400 text-blue-700' : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'">
+                                <button @click="updateEdgeProperty('pattern', 'dotted')" class="flex-1 py-1.5 border rounded-lg text-xs transition shadow-2xs"
+                                        :class="(activeEdge.data?.pattern === 'dotted') ? 'bg-blue-50 border-blue-400 text-blue-700 font-bold' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'">
                                     Dotted
                                 </button>
                             </div>
                         </div>
 
                         <div>
-                            <label class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 block">Jenis Garis</label>
-                            <div class="grid grid-cols-2 gap-2">
+                            <label class="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2 block">Jenis Garis</label>
+                            <div class="grid grid-cols-2 gap-2 mb-3">
                                 <button v-for="t in [
-                                    {id:'straight', label:'Lurus'}, 
+                                    {id:'bezier', label:'Melengkung (Bezier)'},
                                     {id:'smoothstep', label:'Kotak Melengkung'}, 
-                                    {id:'step', label:'Zigzag / Patah'}, 
-                                    {id:'bezier', label:'Melengkung Bebas'}
+                                    {id:'straight', label:'Lurus (Straight)'}, 
+                                    {id:'step', label:'Zigzag / Step'}
                                 ]" :key="t.id"
                                     @click="updateEdgeProperty('type', t.id)"
-                                    class="py-2 px-2 text-xs font-medium border rounded transition shadow-sm"
-                                    :class="(activeEdge.type || 'smoothstep') === t.id ? 'bg-blue-50 border-blue-400 text-blue-700' : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'">
+                                    class="py-1.5 px-2 text-xs font-medium border rounded-lg transition shadow-2xs"
+                                    :class="(activeEdge.type || 'bezier') === t.id ? 'bg-blue-50 border-blue-400 text-blue-700 font-bold' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'">
                                     {{ t.label }}
-                                </button>
-                            </div>
-                            <p class="text-[10px] text-gray-400 mt-2 leading-tight">
-                                *Tips: Untuk membelokkan garis secara custom dengan mouse, buat node baru di tengah, ubah gayanya jadi Transparan, lalu jadikan node tersebut sebagai titik belok.
-                            </p>
-                        </div>
-                        <div>
-                            <label class="flex items-center cursor-pointer group mb-2">
-                                <input type="checkbox" :checked="activeEdge.animated" @change="updateEdgeProperty('animated', $event.target.checked)" class="rounded text-blue-600 focus:ring-blue-500 border-gray-300" />
-                                <span class="ml-2 text-sm text-gray-700 group-hover:text-gray-900 font-medium">Animated (Flowing)</span>
-                            </label>
-                            
-                            <div v-if="activeEdge.animated" class="pl-6 border-l-2 border-blue-100 ml-1">
-                                <label class="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1 block mt-2">Gaya Animasi</label>
-                                <div class="flex gap-1 bg-blue-50 p-1 rounded-md mb-2">
-                                    <button @click="updateEdgeProperty('animStyle', 'flow')" class="flex-1 py-1 text-xs font-medium rounded transition-colors" :class="(activeEdge.data?.animStyle || 'flow') === 'flow' ? 'bg-blue-500 text-white shadow-sm' : 'text-blue-700 hover:bg-blue-100'">Flow</button>
-                                    <button @click="updateEdgeProperty('animStyle', 'ants')" class="flex-1 py-1 text-xs font-medium rounded transition-colors" :class="activeEdge.data?.animStyle === 'ants' ? 'bg-blue-500 text-white shadow-sm' : 'text-blue-700 hover:bg-blue-100'">Ants</button>
-                                    <button @click="updateEdgeProperty('animStyle', 'pulse')" class="flex-1 py-1 text-xs font-medium rounded transition-colors" :class="activeEdge.data?.animStyle === 'pulse' ? 'bg-blue-500 text-white shadow-sm' : 'text-blue-700 hover:bg-blue-100'">Pulse</button>
-                                    <button @click="updateEdgeProperty('animStyle', 'snake')" class="flex-1 py-1 text-xs font-medium rounded transition-colors" :class="activeEdge.data?.animStyle === 'snake' ? 'bg-blue-500 text-white shadow-sm' : 'text-blue-700 hover:bg-blue-100'">Snake</button>
-                                </div>
-                                
-                                <label class="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1 block">Kecepatan</label>
-                                <div class="flex gap-1 bg-blue-50 p-1 rounded-md mb-2">
-                                    <button @click="updateEdgeProperty('animSpeed', 'slow')" class="flex-1 py-1 text-xs font-medium rounded transition-colors" :class="activeEdge.data?.animSpeed === 'slow' ? 'bg-blue-500 text-white shadow-sm' : 'text-blue-700 hover:bg-blue-100'">Slow</button>
-                                    <button @click="updateEdgeProperty('animSpeed', 'normal')" class="flex-1 py-1 text-xs font-medium rounded transition-colors" :class="(activeEdge.data?.animSpeed || 'normal') === 'normal' ? 'bg-blue-500 text-white shadow-sm' : 'text-blue-700 hover:bg-blue-100'">Normal</button>
-                                    <button @click="updateEdgeProperty('animSpeed', 'fast')" class="flex-1 py-1 text-xs font-medium rounded transition-colors" :class="activeEdge.data?.animSpeed === 'fast' ? 'bg-blue-500 text-white shadow-sm' : 'text-blue-700 hover:bg-blue-100'">Fast</button>
-                                </div>
-
-                                <label class="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1 block">Arah Aliran</label>
-                                <div class="flex gap-1 bg-blue-50 p-1 rounded-md">
-                                    <button @click="updateEdgeProperty('animDirection', 'normal')" class="flex-1 py-1 text-xs font-medium rounded transition-colors" :class="(activeEdge.data?.animDirection || 'normal') === 'normal' ? 'bg-blue-500 text-white shadow-sm' : 'text-blue-700 hover:bg-blue-100'">Maju</button>
-                                    <button @click="updateEdgeProperty('animDirection', 'reverse')" class="flex-1 py-1 text-xs font-medium rounded transition-colors" :class="activeEdge.data?.animDirection === 'reverse' ? 'bg-blue-500 text-white shadow-sm' : 'text-blue-700 hover:bg-blue-100'">Mundur</button>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <div>
-                            <label class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 block">Ukuran Panah (Marker Size)</label>
-                            <input type="range" min="10" max="40" :value="activeEdge.data?.arrowSize || 20" @input="updateEdgeProperty('arrowSize', parseInt($event.target.value))" class="w-full text-blue-500 mb-2" />
-                            
-                            <label class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 block">Model Panah</label>
-                            <div class="grid grid-cols-5 gap-1 bg-gray-100 p-1 rounded-md mb-3">
-                                <button v-for="m in [{id:'arrowclosed', i:'▲'}, {id:'arrow', i:'^'}, {id:'circle', i:'●'}, {id:'diamond', i:'◆'}, {id:'square', i:'■'}]" :key="m.id"
-                                    @click="updateEdgeProperty('arrowModel', m.id)"
-                                    class="py-1 text-xs font-medium rounded transition-colors shadow-sm flex justify-center items-center"
-                                    :class="(activeEdge.data?.arrowModel || 'arrowclosed') === m.id ? 'bg-white text-blue-700' : 'text-gray-600 hover:bg-gray-200'"
-                                    :title="m.id">
-                                    {{ m.i }}
-                                </button>
-                            </div>
-                            
-                            <label class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 block">Arah Panah</label>
-                            <div class="grid grid-cols-4 gap-1 bg-gray-100 p-1 rounded-md">
-                                <button v-for="d in [{id:'none', i:'--'}, {id:'forward', i:'->'}, {id:'backward', i:'<-'}, {id:'both', i:'<->'}]" :key="d.id"
-                                    @click="updateEdgeProperty('arrow', d.id)"
-                                    class="py-1 text-xs font-medium rounded transition-colors shadow-sm flex justify-center items-center tracking-tighter"
-                                    :class="(activeEdge.data?.arrow || 'none') === d.id ? 'bg-white text-blue-700' : 'text-gray-600 hover:bg-gray-200'"
-                                    :title="d.id">
-                                    {{ d.i }}
                                 </button>
                             </div>
                         </div>
@@ -2084,73 +2574,43 @@ onUnmounted(() => {
                     <!-- EDGE LABEL PROPERTIES -->
                     <template v-else-if="activeSelectionType === 'edge' && activeEdge && activeEdgeLabel">
                         <div class="mb-4">
-                            <label class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 block">Alignment (Rotasi)</label>
+                            <label class="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2 block">Alignment (Rotasi)</label>
                             <div class="flex gap-2">
-                                <button @click="updateEdgeLabelProperty('rotation', 'horizontal')" class="flex-1 py-1.5 border rounded text-sm transition shadow-sm"
-                                        :class="(activeEdgeLabel.rotation || 'horizontal') === 'horizontal' ? 'bg-blue-50 border-blue-400 text-blue-700' : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'">
+                                <button @click="updateEdgeLabelProperty('rotation', 'horizontal')" class="flex-1 py-1.5 border rounded-lg text-xs transition shadow-2xs"
+                                        :class="(activeEdgeLabel.rotation || 'horizontal') === 'horizontal' ? 'bg-blue-50 border-blue-400 text-blue-700 font-bold' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'">
                                     Horizontal
                                 </button>
-                                <button @click="updateEdgeLabelProperty('rotation', 'follow')" class="flex-1 py-1.5 border rounded text-sm transition shadow-sm"
-                                        :class="(activeEdgeLabel.rotation === 'follow') ? 'bg-blue-50 border-blue-400 text-blue-700' : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'">
+                                <button @click="updateEdgeLabelProperty('rotation', 'follow')" class="flex-1 py-1.5 border rounded-lg text-xs transition shadow-2xs"
+                                        :class="(activeEdgeLabel.rotation === 'follow') ? 'bg-blue-50 border-blue-400 text-blue-700 font-bold' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'">
                                     Follow Line
                                 </button>
                             </div>
                         </div>
 
                         <div class="mb-4">
-                            <label class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 block">Visual Style (Tema)</label>
+                            <label class="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2 block">Visual Style (Tema)</label>
                             <div class="grid grid-cols-1 gap-2">
-                                <button @click="updateEdgeLabelProperty('theme', 'pill')" class="py-2 border rounded text-sm transition flex items-center justify-center shadow-sm"
-                                        :class="(!activeEdgeLabel.theme || activeEdgeLabel.theme === 'pill') ? 'bg-blue-50 border-blue-400 text-blue-700' : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'">
+                                <button @click="updateEdgeLabelProperty('theme', 'pill')" class="py-2 border rounded-lg text-xs transition flex items-center justify-center shadow-2xs"
+                                        :class="(!activeEdgeLabel.theme || activeEdgeLabel.theme === 'pill') ? 'bg-blue-50 border-blue-400 text-blue-700 font-bold' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'">
                                     Pill (Latar + Garis Batas)
                                 </button>
-                                <button @click="updateEdgeLabelProperty('theme', 'cut')" class="py-2 border rounded text-sm transition flex items-center justify-center shadow-sm"
-                                        :class="(activeEdgeLabel.theme === 'cut') ? 'bg-blue-50 border-blue-400 text-blue-700' : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'">
+                                <button @click="updateEdgeLabelProperty('theme', 'cut')" class="py-2 border rounded-lg text-xs transition flex items-center justify-center shadow-2xs"
+                                        :class="(activeEdgeLabel.theme === 'cut') ? 'bg-blue-50 border-blue-400 text-blue-700 font-bold' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'">
                                     Cut-out (Memotong Garis)
                                 </button>
-                                
-                                <div v-if="activeEdgeLabel.theme === 'cut'" class="bg-gray-50 border border-gray-200 rounded p-3 mt-1">
-                                    <label class="flex items-center cursor-pointer group mb-2">
-                                        <input type="checkbox" :checked="activeEdgeLabel.animated" @change="updateEdgeLabelProperty('animated', $event.target.checked)" class="rounded text-blue-600 focus:ring-blue-500 border-gray-300" />
-                                        <span class="ml-2 text-sm text-gray-700 group-hover:text-gray-900 font-medium">Animasi Border</span>
-                                    </label>
-                                    
-                                    <div v-if="activeEdgeLabel.animated" class="pl-6 border-l-2 border-blue-100 ml-1">
-                                        <label class="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1 block mt-2">Gaya Animasi</label>
-                                        <div class="flex gap-1 bg-white p-1 rounded border border-gray-100 mb-2">
-                                            <button @click="updateEdgeLabelProperty('animStyle', 'flow')" class="flex-1 py-1 text-xs font-medium rounded transition-colors" :class="(activeEdgeLabel.animStyle || 'flow') === 'flow' ? 'bg-blue-500 text-white shadow-sm' : 'text-blue-700 hover:bg-blue-50'">Flow</button>
-                                            <button @click="updateEdgeLabelProperty('animStyle', 'ants')" class="flex-1 py-1 text-xs font-medium rounded transition-colors" :class="activeEdgeLabel.animStyle === 'ants' ? 'bg-blue-500 text-white shadow-sm' : 'text-blue-700 hover:bg-blue-50'">Ants</button>
-                                            <button @click="updateEdgeLabelProperty('animStyle', 'pulse')" class="flex-1 py-1 text-xs font-medium rounded transition-colors" :class="activeEdgeLabel.animStyle === 'pulse' ? 'bg-blue-500 text-white shadow-sm' : 'text-blue-700 hover:bg-blue-50'">Pulse</button>
-                                            <button @click="updateEdgeLabelProperty('animStyle', 'snake')" class="flex-1 py-1 text-xs font-medium rounded transition-colors" :class="activeEdgeLabel.animStyle === 'snake' ? 'bg-blue-500 text-white shadow-sm' : 'text-blue-700 hover:bg-blue-50'">Snake</button>
-                                        </div>
-                                        
-                                        <label class="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1 block">Kecepatan</label>
-                                        <div class="flex gap-1 bg-white p-1 rounded border border-gray-100 mb-2">
-                                            <button @click="updateEdgeLabelProperty('animSpeed', 'slow')" class="flex-1 py-1 text-xs font-medium rounded transition-colors" :class="activeEdgeLabel.animSpeed === 'slow' ? 'bg-blue-500 text-white shadow-sm' : 'text-blue-700 hover:bg-blue-50'">Slow</button>
-                                            <button @click="updateEdgeLabelProperty('animSpeed', 'normal')" class="flex-1 py-1 text-xs font-medium rounded transition-colors" :class="(activeEdgeLabel.animSpeed || 'normal') === 'normal' ? 'bg-blue-500 text-white shadow-sm' : 'text-blue-700 hover:bg-blue-50'">Normal</button>
-                                            <button @click="updateEdgeLabelProperty('animSpeed', 'fast')" class="flex-1 py-1 text-xs font-medium rounded transition-colors" :class="activeEdgeLabel.animSpeed === 'fast' ? 'bg-blue-500 text-white shadow-sm' : 'text-blue-700 hover:bg-blue-50'">Fast</button>
-                                        </div>
-
-                                        <label class="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1 block">Arah Aliran</label>
-                                        <div class="flex gap-1 bg-white p-1 rounded border border-gray-100">
-                                            <button @click="updateEdgeLabelProperty('animDirection', 'normal')" class="flex-1 py-1 text-xs font-medium rounded transition-colors" :class="(activeEdgeLabel.animDirection || 'normal') === 'normal' ? 'bg-blue-500 text-white shadow-sm' : 'text-blue-700 hover:bg-blue-50'">Maju</button>
-                                            <button @click="updateEdgeLabelProperty('animDirection', 'reverse')" class="flex-1 py-1 text-xs font-medium rounded transition-colors" :class="activeEdgeLabel.animDirection === 'reverse' ? 'bg-blue-500 text-white shadow-sm' : 'text-blue-700 hover:bg-blue-50'">Mundur</button>
-                                        </div>
-                                    </div>
-                                </div>
-                                <button @click="updateEdgeLabelProperty('theme', 'transparent')" class="py-2 border rounded text-sm transition flex items-center justify-center shadow-sm"
-                                        :class="(activeEdgeLabel.theme === 'transparent') ? 'bg-blue-50 border-blue-400 text-blue-700' : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'">
+                                <button @click="updateEdgeLabelProperty('theme', 'transparent')" class="py-2 border rounded-lg text-xs transition flex items-center justify-center shadow-2xs"
+                                        :class="(activeEdgeLabel.theme === 'transparent') ? 'bg-blue-50 border-blue-400 text-blue-700 font-bold' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'">
                                     Transparan (Hanya Teks)
                                 </button>
                             </div>
                         </div>
                         
                         <div class="mb-4">
-                            <label class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 block">Warna Teks</label>
+                            <label class="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2 block">Warna Teks</label>
                             <div class="flex flex-wrap gap-2">
                                 <button v-for="c in ['#374151', '#ef4444', '#f59e0b', '#10b981', '#3b82f6', '#8b5cf6', '#ec4899', '#ffffff']" :key="c"
                                     @click="updateEdgeLabelProperty('color', c)" 
-                                    class="w-6 h-6 rounded-full border border-gray-200 transition hover:scale-110 shadow-sm"
+                                    class="w-6 h-6 rounded-full border border-gray-200 transition hover:scale-110 shadow-xs"
                                     :class="(activeEdgeLabel.color || '#374151') === c ? 'ring-2 ring-offset-1 ring-blue-500' : ''"
                                     :style="{ backgroundColor: c }">
                                 </button>
@@ -2158,11 +2618,11 @@ onUnmounted(() => {
                         </div>
 
                         <div class="mb-4" v-if="activeEdgeLabel.theme !== 'transparent'">
-                            <label class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 block">Warna Latar</label>
+                            <label class="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2 block">Warna Latar</label>
                             <div class="flex flex-wrap gap-2">
                                 <button v-for="c in ['#ffffff', '#f3f4f6', '#fecaca', '#fde68a', '#a7f3d0', '#bfdbfe', '#e9d5ff', '#1f2937']" :key="'bg'+c"
                                     @click="updateEdgeLabelProperty('bgColor', c)" 
-                                    class="w-6 h-6 rounded-full border border-gray-200 transition hover:scale-110 shadow-sm"
+                                    class="w-6 h-6 rounded-full border border-gray-200 transition hover:scale-110 shadow-xs"
                                     :class="(activeEdgeLabel.bgColor || '#ffffff') === c ? 'ring-2 ring-offset-1 ring-blue-500' : ''"
                                     :style="{ backgroundColor: c }">
                                 </button>
@@ -2170,112 +2630,92 @@ onUnmounted(() => {
                         </div>
 
                         <div>
-                            <label class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 block">Ukuran Font</label>
+                            <label class="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1 block">Ukuran Font</label>
                             <input type="range" min="10" max="24" :value="activeEdgeLabel.fontSize || 14" @input="updateEdgeLabelProperty('fontSize', parseInt($event.target.value))" class="w-full text-blue-500" />
-                            <div class="text-right text-xs text-gray-500 mt-1">{{ activeEdgeLabel.fontSize || 14 }}px</div>
+                            <div class="text-right text-[10px] text-gray-400 mt-1">{{ activeEdgeLabel.fontSize || 14 }}px</div>
                         </div>
                     </template>
 
                     <!-- CANVAS PROPERTIES -->
                     <template v-else>
                         <div>
-                            <label class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 block">Warna Background Kanvas</label>
+                            <label class="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2 block">Warna Background Kanvas</label>
                             <div class="flex flex-wrap gap-2 mb-4">
                                 <button v-for="(c, i) in canvasBackgrounds" :key="'canvas-bg'+i"
                                     @click="updateCanvasProperty('backgroundColor', c)" 
-                                    class="w-6 h-6 rounded-full border border-gray-200 transition hover:scale-110 shadow-sm"
+                                    class="w-6 h-6 rounded-full border border-gray-200 transition hover:scale-110 shadow-xs"
                                     :class="(settings.backgroundColor || '#ffffff') === c ? 'ring-2 ring-offset-1 ring-blue-500' : ''"
                                     :style="{ background: c }">
                                 </button>
                             </div>
                         </div>
                         <div>
-                            <label class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 block">Background Pattern</label>
-                            <div class="flex gap-2 bg-gray-100 p-1 rounded-md">
-                                <button @click="updateCanvasProperty('backgroundStyle', 'dots')" class="flex-1 py-1.5 text-xs font-medium rounded transition-colors shadow-sm" :class="settings.backgroundStyle === 'dots' ? 'bg-white text-blue-700' : 'text-gray-600 hover:bg-gray-200'">Dots</button>
-                                <button @click="updateCanvasProperty('backgroundStyle', 'lines')" class="flex-1 py-1.5 text-xs font-medium rounded transition-colors shadow-sm" :class="settings.backgroundStyle === 'lines' ? 'bg-white text-blue-700' : 'text-gray-600 hover:bg-gray-200'">Lines</button>
-                                <button @click="updateCanvasProperty('backgroundStyle', 'none')" class="flex-1 py-1.5 text-xs font-medium rounded transition-colors shadow-sm" :class="settings.backgroundStyle === 'none' ? 'bg-white text-blue-700' : 'text-gray-600 hover:bg-gray-200'">None</button>
+                            <label class="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2 block">Background Pattern</label>
+                            <div class="flex gap-2 bg-gray-50 p-1 rounded-lg border border-gray-100">
+                                <button @click="updateCanvasProperty('backgroundStyle', 'dots')" class="flex-1 py-1 text-xs font-medium rounded-md transition-colors shadow-2xs" :class="settings.backgroundStyle === 'dots' ? 'bg-white text-blue-700 font-bold' : 'text-gray-600 hover:bg-gray-100'">Dots</button>
+                                <button @click="updateCanvasProperty('backgroundStyle', 'lines')" class="flex-1 py-1 text-xs font-medium rounded-md transition-colors shadow-2xs" :class="settings.backgroundStyle === 'lines' ? 'bg-white text-blue-700 font-bold' : 'text-gray-600 hover:bg-gray-100'">Lines</button>
+                                <button @click="updateCanvasProperty('backgroundStyle', 'none')" class="flex-1 py-1 text-xs font-medium rounded-md transition-colors shadow-2xs" :class="settings.backgroundStyle === 'none' ? 'bg-white text-blue-700 font-bold' : 'text-gray-600 hover:bg-gray-100'">None</button>
                             </div>
                         </div>
                         <div>
-                            <label class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 block">Default Branch Style</label>
-                            <div class="grid grid-cols-5 gap-1 bg-gray-100 p-1 rounded-md">
-                                <button v-for="t in [{id:'brace', i:'-{'}, {id:'step', i:'-['}, {id:'smoothstep', i:'-C'}, {id:'bezier', i:'-~'}, {id:'straight', i:'--'}]" :key="t.id"
+                            <label class="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2 block">Default Branch Style</label>
+                            <div class="grid grid-cols-5 gap-1 bg-gray-50 p-1 rounded-lg border border-gray-100">
+                                <button v-for="t in [{id:'bezier', i:'-~'}, {id:'brace', i:'-{'}, {id:'smoothstep', i:'-C'}, {id:'step', i:'-['}, {id:'straight', i:'--'}]" :key="t.id"
                                     @click="updateCanvasProperty('edgeStyle', t.id)"
-                                    class="py-1 text-sm font-medium rounded transition-colors shadow-sm flex justify-center items-center"
-                                    :class="settings.edgeStyle === t.id ? 'bg-white text-blue-700' : 'text-gray-600 hover:bg-gray-200'"
+                                    class="py-1 text-xs font-medium rounded-md transition-colors shadow-2xs flex justify-center items-center"
+                                    :class="settings.edgeStyle === t.id ? 'bg-white text-blue-700 font-bold' : 'text-gray-600 hover:bg-gray-100'"
                                     :title="t.id">
                                     {{ t.i }}
                                 </button>
                             </div>
                         </div>
                         <div>
-                            <label class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 block">Aspect Ratio (Export Size)</label>
-                            <select :value="settings.aspectRatio" @change="updateCanvasProperty('aspectRatio', $event.target.value)" class="w-full text-sm border-gray-300 rounded focus:ring-blue-500 p-2 shadow-sm">
-                                <option value="auto">Auto (Full Screen)</option>
-                                <option value="16/9">16:9 Landscape (YouTube/Presentations)</option>
-                                <option value="9/16">9:16 Portrait (TikTok/Reels/Shorts)</option>
-                                <option value="1/1">1:1 Square (Instagram/Post)</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 block">Default Line Color</label>
-                            <div class="flex flex-wrap gap-2">
-                                <button v-for="c in ['#94a3b8', '#ef4444', '#f59e0b', '#10b981', '#3b82f6', '#8b5cf6', '#0f172a']" 
-                                    @click="updateCanvasProperty('edgeColor', c)" 
-                                    class="w-6 h-6 rounded-full border transition hover:scale-110 shadow-sm"
-                                    :class="settings.edgeColor === c ? 'ring-2 ring-offset-1 ring-blue-500' : 'border-transparent'"
-                                    :style="{ backgroundColor: c }">
-                                </button>
-                            </div>
-                        </div>
-
-                        <div>
-                            <label class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 block">Tampilan Bantuan</label>
-                            <div class="flex flex-col gap-2 bg-gray-100 p-2 rounded-md">
+                            <label class="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2 block">Tampilan Bantuan</label>
+                            <div class="flex flex-col gap-2 bg-gray-50 p-2 rounded-lg border border-gray-100">
                                 <label class="flex items-center cursor-pointer group">
                                     <input type="checkbox" :checked="settings.showMinimap !== false" @change="updateCanvasProperty('showMinimap', $event.target.checked)" class="rounded text-blue-600 focus:ring-blue-500 border-gray-300" />
-                                    <span class="ml-2 text-sm text-gray-700 group-hover:text-gray-900 font-medium">Tampilkan MiniMap</span>
+                                    <span class="ml-2 text-xs text-gray-700 group-hover:text-gray-900 font-medium">Tampilkan MiniMap</span>
                                 </label>
                                 <label class="flex items-center cursor-pointer group">
                                     <input type="checkbox" :checked="settings.showControls !== false" @change="updateCanvasProperty('showControls', $event.target.checked)" class="rounded text-blue-600 focus:ring-blue-500 border-gray-300" />
-                                    <span class="ml-2 text-sm text-gray-700 group-hover:text-gray-900 font-medium">Tampilkan Tombol Zoom</span>
+                                    <span class="ml-2 text-xs text-gray-700 group-hover:text-gray-900 font-medium">Tampilkan Tombol Zoom</span>
                                 </label>
                             </div>
                         </div>
                     </template>
                 </div>
             </div>
-        </div>
+        </main>
 
+        <!-- Modals -->
         <DialogModal :show="isShareModalOpen" @close="isShareModalOpen = false">
             <template #title>
                 Share Mindmap
             </template>
             <template #content>
                 <div class="mb-6 bg-gray-50 p-4 rounded-lg border border-gray-200">
-                    <h4 class="font-medium text-gray-900 mb-2">Public Link</h4>
+                    <h4 class="font-medium text-gray-900 mb-2 text-xs">Public Link</h4>
                     <div class="flex items-center justify-between mb-3">
                         <label class="flex items-center cursor-pointer">
                             <input type="checkbox" v-model="isPublic" @change="updatePublicSettings" class="rounded text-blue-600 focus:ring-blue-500 border-gray-300" />
-                            <span class="ml-2 text-sm text-gray-700">Anyone with the link can access</span>
+                            <span class="ml-2 text-xs text-gray-700">Anyone with the link can access</span>
                         </label>
-                        <select v-if="isPublic" v-model="publicPermission" @change="updatePublicSettings" class="text-sm border-gray-300 rounded focus:ring-blue-500 py-1 pl-2 pr-8">
+                        <select v-if="isPublic" v-model="publicPermission" @change="updatePublicSettings" class="text-xs border-gray-300 rounded focus:ring-blue-500 py-1 pl-2 pr-8">
                             <option value="view">Can View</option>
                             <option value="edit">Can Edit</option>
                         </select>
                     </div>
                     <div v-if="isPublic" class="flex mt-2">
-                        <input type="text" readonly :value="route('mindmaps.edit', props.mindmap.id)" class="flex-1 text-sm border-gray-300 rounded-l focus:ring-0 bg-white" />
-                        <button onclick="navigator.clipboard.writeText(this.previousElementSibling.value); this.innerText='Copied!';" class="bg-gray-200 hover:bg-gray-300 text-gray-700 px-3 text-sm font-medium rounded-r border border-l-0 border-gray-300 transition-colors">Copy</button>
+                        <input type="text" readonly :value="route('mindmaps.edit', props.mindmap.id)" class="flex-1 text-xs border-gray-300 rounded-l focus:ring-0 bg-white" />
+                        <button onclick="navigator.clipboard.writeText(this.previousElementSibling.value); this.innerText='Copied!';" class="bg-gray-200 hover:bg-gray-300 text-gray-700 px-3 text-xs font-medium rounded-r border border-l-0 border-gray-300 transition-colors">Copy</button>
                     </div>
                 </div>
 
                 <div class="mb-4">
-                    <h4 class="font-medium text-gray-900 mb-2">Invite Collaborators</h4>
+                    <h4 class="font-medium text-gray-900 mb-2 text-xs">Invite Collaborators</h4>
                     <form @submit.prevent="inviteUser" class="flex gap-2">
-                        <TextInput v-model="shareEmail" type="email" placeholder="Enter email address" class="flex-1" required />
-                        <select v-model="sharePermission" class="text-sm border-gray-300 rounded focus:ring-blue-500">
+                        <TextInput v-model="shareEmail" type="email" placeholder="Enter email address" class="flex-1 text-xs" required />
+                        <select v-model="sharePermission" class="text-xs border-gray-300 rounded focus:ring-blue-500">
                             <option value="view">Can View</option>
                             <option value="edit">Can Edit</option>
                         </select>
@@ -2284,15 +2724,15 @@ onUnmounted(() => {
                 </div>
 
                 <div v-if="props.mindmap.shares && props.mindmap.shares.length > 0">
-                    <h4 class="font-medium text-gray-900 mb-2 mt-6">People with access</h4>
+                    <h4 class="font-medium text-gray-900 mb-2 mt-6 text-xs">People with access</h4>
                     <ul class="divide-y divide-gray-100 border border-gray-100 rounded-lg">
                         <li v-for="share in props.mindmap.shares" :key="share.id" class="p-3 flex items-center justify-between hover:bg-gray-50">
                             <div>
-                                <p class="text-sm font-medium text-gray-900">{{ share.email }}</p>
+                                <p class="text-xs font-medium text-gray-900">{{ share.email }}</p>
                             </div>
                             <div class="flex items-center gap-3">
-                                <span class="text-xs px-2 py-1 bg-gray-100 text-gray-600 rounded">{{ share.permission === 'edit' ? 'Can Edit' : 'Can View' }}</span>
-                                <button @click="removeUser(share.email)" class="text-red-500 hover:text-red-700 text-sm font-medium">Remove</button>
+                                <span class="text-[10px] px-2 py-1 bg-gray-100 text-gray-600 rounded">{{ share.permission === 'edit' ? 'Can Edit' : 'Can View' }}</span>
+                                <button @click="removeUser(share.email)" class="text-red-500 hover:text-red-700 text-xs font-medium">Remove</button>
                             </div>
                         </li>
                     </ul>
@@ -2309,8 +2749,8 @@ onUnmounted(() => {
             </template>
             <template #content>
                 <div class="mt-4">
-                    <p class="text-sm text-gray-600 mb-2">Berapa detik durasi video yang ingin direkam?</p>
-                    <TextInput v-model="recordDurationTemp" type="number" min="1" max="300" class="w-full" placeholder="Durasi dalam detik" @keyup.enter="startVideoRecording" autofocus />
+                    <p class="text-xs text-gray-600 mb-2">Berapa detik durasi video yang ingin direkam?</p>
+                    <TextInput v-model="recordDurationTemp" type="number" min="1" max="300" class="w-full text-xs" placeholder="Durasi dalam detik" @keyup.enter="startVideoRecording" autofocus />
                 </div>
             </template>
             <template #footer>
@@ -2324,7 +2764,7 @@ onUnmounted(() => {
                 Fitur Diblokir Browser
             </template>
             <template #content>
-                <div class="mt-4 text-sm text-gray-600 space-y-3">
+                <div class="mt-4 text-xs text-gray-600 space-y-3">
                     <p>Fitur Perekaman Layar (Record Video) diblokir oleh browser karena membutuhkan koneksi aman (HTTPS).</p>
                     <p>Karena Anda mengakses aplikasi ini melalui HTTP biasa (misalnya domain lokal Laragon tanpa SSL), browser mematikan fitur ini demi keamanan.</p>
                     <p class="font-medium text-gray-800">SOLUSI: Silakan akses menggunakan http://localhost atau aktifkan sertifikat SSL (HTTPS) di Laragon Anda.</p>
@@ -2337,13 +2777,13 @@ onUnmounted(() => {
         
         <!-- Toast Notification -->
         <Transition enter-active-class="transition ease-out duration-300" enter-from-class="transform opacity-0 translate-y-2" enter-to-class="transform opacity-100 translate-y-0" leave-active-class="transition ease-in duration-200" leave-from-class="transform opacity-100 translate-y-0" leave-to-class="transform opacity-0 translate-y-2">
-            <div v-if="toast.show" class="fixed bottom-6 left-1/2 transform -translate-x-1/2 z-[200] flex items-center px-4 py-3 rounded-lg shadow-lg border" :class="toast.type === 'error' ? 'bg-red-50 border-red-200 text-red-800' : 'bg-green-50 border-green-200 text-green-800'">
-                <svg v-if="toast.type === 'error'" class="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                <svg v-else class="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                <span class="font-medium text-sm">{{ toast.message }}</span>
+            <div v-if="toast.show" class="fixed bottom-6 left-1/2 transform -translate-x-1/2 z-[200] flex items-center px-4 py-2.5 rounded-lg shadow-lg border" :class="toast.type === 'error' ? 'bg-red-50 border-red-200 text-red-800' : 'bg-green-50 border-green-200 text-green-800'">
+                <svg v-if="toast.type === 'error'" class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                <svg v-else class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                <span class="font-medium text-xs">{{ toast.message }}</span>
             </div>
         </Transition>
-    </component>
+    </div>
 </template>
 
 <style>
