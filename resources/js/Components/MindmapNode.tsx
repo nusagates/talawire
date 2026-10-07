@@ -15,9 +15,24 @@ export default function MindmapNode({
 
     const isRoot = id === 'root' || Boolean(data?.isRoot) || data?.level === 0;
     const isLevel1 = data?.level === 1;
+    const isLevel2 = data?.level === 2;
+    const isLevel3Plus = !isRoot && !isLevel1 && !isLevel2;
     const canEdit = data?.canEdit !== false;
-    const branchColor = (data?.branchColor as string) || '#fa8c16';
+    const branchColor = (data?.branchColor as string) || '#ff6b4a';
     const isLeft = data?.branchDirection === 'left';
+
+    const hexToRgba = (hex: string, alpha: number): string => {
+        const cleanHex = (hex || '#ff6b4a').replace('#', '');
+        let fullHex = cleanHex;
+        if (cleanHex.length === 3) {
+            fullHex = cleanHex.split('').map((c) => c + c).join('');
+        }
+        const num = parseInt(fullHex, 16) || 0;
+        const r = (num >> 16) & 255;
+        const g = (num >> 8) & 255;
+        const b = num & 255;
+        return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+    };
 
     useEffect(() => {
         setLocalLabel((data?.label as string) ?? '');
@@ -189,13 +204,24 @@ export default function MindmapNode({
     let textStyle: React.CSSProperties = {};
     let placeholderText = '';
 
+    let cardPositionClass = 'w-full h-full';
+    if (isEditing) {
+        if (isRoot) {
+            cardPositionClass = 'absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 min-w-full w-max h-full z-50 shadow-md';
+        } else if (isLeft) {
+            cardPositionClass = 'absolute right-0 top-0 min-w-full w-max h-full z-50 shadow-sm';
+        } else {
+            cardPositionClass = 'absolute left-0 top-0 min-w-full w-max h-full z-50 shadow-sm';
+        }
+    }
+
     if (isRoot) {
-        cardClass = `w-full h-full px-2.5 flex items-center justify-center transition-all ${
+        cardClass = `${cardPositionClass} px-3 flex items-center justify-center transition-all ${
             isEditing ? 'cursor-text' : 'cursor-pointer'
         } ${
             selected || isEditing
-                ? 'bg-white border-2 border-blue-500 rounded-xl ring-2 ring-blue-500/20'
-                : 'bg-transparent border-2 border-transparent rounded-xl hover:bg-white hover:border-blue-500 hover:ring-2 hover:ring-blue-500/20'
+                ? 'bg-white border-2 border-blue-500 rounded-xl ring-2 ring-blue-500/20 shadow-xs'
+                : 'bg-transparent border-2 border-transparent rounded-xl hover:bg-white/80 hover:border-blue-400 hover:ring-2 hover:ring-blue-400/20'
         }`;
         cardStyle = {
             backgroundColor: selected || isEditing ? '#ffffff' : (data?.bgColor as string) || 'transparent',
@@ -204,18 +230,18 @@ export default function MindmapNode({
             color: (data?.textColor as string) || '#0f172a',
             fontSize: '22px',
             fontWeight: 700,
-            letterSpacing: '-0.2px',
+            letterSpacing: '-0.3px',
             fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
             textAlign: 'center',
         };
         placeholderText = 'Central Topic';
     } else if (isLevel1) {
-        cardClass = `w-full h-full px-2.5 rounded-lg flex items-center justify-center transition-all shadow-xs ${
+        cardClass = `${cardPositionClass} px-3 rounded-lg flex items-center justify-center transition-all shadow-2xs ${
             isEditing ? 'cursor-text' : 'cursor-pointer'
         } ${
             selected || isEditing
                 ? 'ring-2 ring-offset-1 ring-blue-500 shadow-sm'
-                : 'hover:ring-2 hover:ring-offset-1 hover:ring-blue-500 hover:shadow-sm'
+                : 'hover:ring-2 hover:ring-offset-1 hover:ring-blue-500/70'
         }`;
         cardStyle = {
             backgroundColor: (data?.bgColor as string) || branchColor,
@@ -229,19 +255,42 @@ export default function MindmapNode({
             textAlign: 'center',
         };
         placeholderText = 'Main Topic';
-    } else {
-        cardClass = `w-full h-full px-1 rounded-md flex items-center ${isLeft ? 'justify-end text-right' : 'justify-start text-left'} transition-all ${
+    } else if (isLevel2) {
+        // Level 2 Subtopic: Soft Tint Pill Badge
+        cardClass = `${cardPositionClass} px-2 py-0.5 rounded-md flex items-center justify-center transition-all ${
             isEditing ? 'cursor-text' : 'cursor-pointer'
         } ${
             selected || isEditing
-                ? 'bg-white border-2 border-blue-500 ring-2 ring-blue-500/20'
-                : 'bg-transparent border-2 border-transparent hover:bg-white hover:border-blue-500 hover:ring-2 hover:ring-blue-500/20'
+                ? 'bg-white ring-2 ring-blue-500 shadow-2xs'
+                : 'hover:ring-1.5 hover:ring-blue-400'
         }`;
         cardStyle = {
-            backgroundColor: selected || isEditing ? '#ffffff' : (data?.bgColor as string) || 'transparent',
+            backgroundColor: selected || isEditing ? '#ffffff' : hexToRgba(branchColor, 0.12),
+            border: selected || isEditing ? '1.5px solid #3b82f6' : '1px solid ' + hexToRgba(branchColor, 0.28),
         };
         textStyle = {
-            color: '#1f2937',
+            color: '#1e293b',
+            fontSize: '13px',
+            fontWeight: 500,
+            lineHeight: 1.25,
+            fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+            textAlign: 'center',
+        };
+        placeholderText = 'Subtopic';
+    } else {
+        // Level 3+ Sub-subtopics: Clean Plain Text (No Underline)
+        cardClass = `${cardPositionClass} px-1.5 flex items-center ${isLeft ? 'justify-end text-right' : 'justify-start text-left'} transition-all ${
+            isEditing ? 'cursor-text' : 'cursor-pointer'
+        } ${
+            selected || isEditing
+                ? 'bg-white border-2 border-blue-500 rounded-md ring-2 ring-blue-500/20'
+                : 'bg-transparent border-2 border-transparent rounded-md hover:bg-white hover:border-blue-400 hover:ring-2 hover:ring-blue-400/20'
+        }`;
+        cardStyle = {
+            backgroundColor: selected || isEditing ? '#ffffff' : 'transparent',
+        };
+        textStyle = {
+            color: '#1e293b',
             fontSize: '13px',
             fontWeight: 500,
             lineHeight: 1.25,
@@ -274,8 +323,10 @@ export default function MindmapNode({
                         cursor: isEditing ? 'text' : 'pointer',
                         pointerEvents: isEditing ? 'auto' : 'none',
                         userSelect: isEditing ? 'auto' : 'none',
+                        width: isEditing ? `${Math.max(2, (localLabel || placeholderText).length + 2)}ch` : '100%',
+                        minWidth: '100%',
                     }}
-                    className="nodrag nopan w-full bg-transparent outline-none border-none p-0 m-0 whitespace-nowrap cursor-pointer"
+                    className="nodrag nopan bg-transparent outline-none border-none p-0 m-0 whitespace-nowrap cursor-pointer"
                     placeholder={placeholderText}
                 />
             </div>

@@ -26,18 +26,20 @@ export default function BraceEdge({
         // Direct straight horizontal line
         path = `M ${sourceX} ${sourceY} L ${targetX} ${targetY}`;
     } else if (isRootEdge) {
-        // Compact organic S-curve
-        const cp1X = sourceX + (isRightBranch ? Math.min(18, absDx * 0.4) : -Math.min(18, absDx * 0.4));
-        const cp2X = targetX - (isRightBranch ? Math.min(20, absDx * 0.45) : -Math.min(20, absDx * 0.45));
-        path = `M ${sourceX} ${sourceY} C ${cp1X} ${sourceY}, ${cp2X} ${targetY}, ${targetX} ${targetY}`;
+        // Organic sweeping cubic bezier from Central Topic to Main Topics (Xmind style)
+        const cp1X = sourceX + dx * 0.45;
+        const cp1Y = sourceY;
+        const cp2X = sourceX + dx * 0.55;
+        const cp2Y = targetY;
+        path = `M ${sourceX} ${sourceY} C ${cp1X} ${cp1Y}, ${cp2X} ${cp2Y}, ${targetX} ${targetY}`;
     } else {
-        // Compact Tree Bracket Fork for Subtopics
-        const forkOffset = Math.min(8, Math.max(5, absDx * 0.35));
+        // Smooth Fillet Tree Bracket Fork for Subtopics
+        const forkOffset = Math.min(10, Math.max(6, absDx * 0.4));
         const forkX = isRightBranch ? sourceX + forkOffset : sourceX - forkOffset;
         const dirX = isRightBranch ? 1 : -1;
         const dirY = dy > 0 ? 1 : -1;
 
-        const maxR = Math.min(4, forkOffset, absDy / 2, (absDx - forkOffset) / 2);
+        const maxR = Math.min(5, forkOffset, absDy / 2, Math.max(0, absDx - forkOffset) / 2);
         const r = Math.max(0, maxR);
 
         if (r <= 1) {

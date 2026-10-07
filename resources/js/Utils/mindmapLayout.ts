@@ -1,14 +1,14 @@
 import { Node, Edge } from '@xyflow/react';
 
 export const XMIND_BRANCH_COLORS = [
-    '#fa8c16', // Vibrant Orange
-    '#ff4d4f', // Vibrant Red / Coral
-    '#13c2c2', // Vibrant Cyan / Teal
-    '#722ed1', // Vibrant Purple
-    '#52c41a', // Vibrant Green
-    '#1890ff', // Vibrant Blue
-    '#eb2f96', // Vibrant Pink
-    '#faad14', // Vibrant Gold
+    '#ff6b4a', // 1. Warm Coral Red
+    '#f78e1e', // 2. Vibrant Tangerine Orange
+    '#10b981', // 3. Emerald Green
+    '#06b6d4', // 4. Cyan / Ocean Blue
+    '#3b82f6', // 5. Sky Blue / Cobalt
+    '#a855f7', // 6. Vibrant Purple / Orchid
+    '#ec4899', // 7. Rose Pink / Magenta
+    '#eab308', // 8. Golden Amber
 ];
 
 // Canvas measurement helper for exact text widths
@@ -80,31 +80,37 @@ export function layoutMindmap(
         }
     });
 
-    // Snug node dimensions matching exact text boundaries with minimal padding
+    // Snug node dimensions matching exact text boundaries with comfortable padding
     const getNodeDim = (nodeId: string, level: number) => {
         const n = nodes.find((item) => item.id === nodeId);
         const label = (n?.data?.label as string) || '';
 
         if (nodeId === rootId || level === 0) {
             const textW = measureText(label || 'Central Topic', 'bold 22px Inter, -apple-system, sans-serif', 14);
-            return { width: Math.max(100, textW + 24), height: 40 };
+            return { width: Math.max(110, textW + 32), height: 42 };
         }
         if (level === 1) {
-            const textW = measureText(label || 'Main Topic', '600 14px Inter, -apple-system, sans-serif', 9);
-            return { width: Math.max(60, textW + 20), height: 34 };
+            const textW = measureText(label || 'Main Topic', '600 14px Inter, -apple-system, sans-serif', 10);
+            return { width: Math.max(70, textW + 28), height: 34 };
         }
-        // Subtopics: exact snug text boundary
-        const textW = measureText(label || 'Subtopic', '500 13px Inter, -apple-system, sans-serif', 8);
-        return { width: Math.max(30, textW + 10), height: 26 };
+        if (level === 2) {
+            // Level 2 Subtopic: Soft Tint Pill Badge
+            const textW = measureText(label || 'Subtopic', '500 13px Inter, -apple-system, sans-serif', 9);
+            return { width: Math.max(50, textW + 24), height: 28 };
+        }
+        // Level 3+ Subtopics: Clean Plain Text
+        const textW = measureText(label || 'Subtopic', '500 13px Inter, -apple-system, sans-serif', 9);
+        return { width: Math.max(36, textW + 18), height: 24 };
     };
 
-    const H_GAP_ROOT = 45; // compact snug horizontal gap from Central Topic to Main Topics
-    const H_GAP_SUB = 16;  // compact snug horizontal gap for subtopic tree brackets
-    const V_GAP = 8;       // compact snug vertical gap between sibling rows
+    const H_GAP_ROOT = 55;  // Organic sweeping horizontal gap from Central Topic to Main Topics
+    const H_GAP_SUB = 18;   // Compact snug horizontal gap for subtopic tree brackets
+    const V_GAP_MAIN = 32;  // Comfortable vertical gap between different Main Topic clusters
+    const V_GAP_SUB = 8;    // Compact vertical gap between sibling subtopics within the same branch
 
     const rootChildren = childrenMap.get(rootId) || [];
 
-    // Calculate node dimensions for preliminary height calculations
+    // Calculate preliminary node dimensions with accurate levels
     const nodeWidths = new Map<string, number>();
     const nodeHeights = new Map<string, number>();
     nodes.forEach((n) => {
@@ -124,7 +130,7 @@ export function layoutMindmap(
         children.forEach((cId) => {
             total += calcRawSubtreeHeight(cId);
         });
-        total += (children.length - 1) * V_GAP;
+        total += (children.length - 1) * V_GAP_SUB;
         return Math.max(selfH, total);
     };
 
@@ -164,10 +170,10 @@ export function layoutMindmap(
 
         if (dir === 'left') {
             leftChildren.push(childId);
-            leftSubtreeTotalH += childSubH + V_GAP;
+            leftSubtreeTotalH += childSubH + V_GAP_MAIN;
         } else {
             rightChildren.push(childId);
-            rightSubtreeTotalH += childSubH + V_GAP;
+            rightSubtreeTotalH += childSubH + V_GAP_MAIN;
         }
 
         // Each Main Topic gets a distinct theme color
@@ -205,7 +211,7 @@ export function layoutMindmap(
         children.forEach((cId) => {
             totalChildH += calcSubtreeHeight(cId);
         });
-        totalChildH += (children.length - 1) * V_GAP;
+        totalChildH += (children.length - 1) * V_GAP_SUB;
         const finalH = Math.max(selfH, totalChildH);
         subtreeHeightMap.set(nodeId, finalH);
         return finalH;
@@ -235,12 +241,13 @@ export function layoutMindmap(
 
         const isParentRoot = parentId === rootId;
         const hGap = isParentRoot ? H_GAP_ROOT : H_GAP_SUB;
+        const vGap = isParentRoot ? V_GAP_MAIN : V_GAP_SUB;
 
         let totalChildrenH = 0;
         children.forEach((cId) => {
             totalChildrenH += subtreeHeightMap.get(cId) || nodeHeights.get(cId) || 26;
         });
-        totalChildrenH += (children.length - 1) * V_GAP;
+        totalChildrenH += (children.length - 1) * vGap;
 
         let currentY = parentCenterY - totalChildrenH / 2;
 
@@ -261,7 +268,7 @@ export function layoutMindmap(
             // Layout subsequent children
             layoutSubtree(cId, childX, childCenterY, isLeft);
 
-            currentY += childSubH + V_GAP;
+            currentY += childSubH + vGap;
         });
     };
 
@@ -276,8 +283,8 @@ export function layoutMindmap(
         const dir = branchDirMap.get(node.id) || (node.data?.branchDirection as 'left' | 'right') || 'right';
         const lvl = nodeLevelMap.get(node.id) ?? (node.id === rootId ? 0 : 2);
         const branchColor = nodeBranchColorMap.get(node.id) || XMIND_BRANCH_COLORS[0];
-        const w = nodeWidths.get(node.id) || (lvl === 0 ? 100 : lvl === 1 ? 60 : 30);
-        const h = nodeHeights.get(node.id) || (lvl === 0 ? 40 : lvl === 1 ? 34 : 26);
+        const w = nodeWidths.get(node.id) || (lvl === 0 ? 110 : lvl === 1 ? 70 : lvl === 2 ? 50 : 36);
+        const h = nodeHeights.get(node.id) || (lvl === 0 ? 42 : lvl === 1 ? 34 : lvl === 2 ? 28 : 24);
 
         return {
             ...node,

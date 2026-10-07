@@ -112,12 +112,12 @@ function MindmapCanvas({ mindmap, canEdit = true, isRenderView = false }: EditPr
 
     // Settings
     const defaultSettings = {
-        backgroundStyle: 'dots',
-        backgroundColor: '#f8fafc',
-        edgeStyle: 'smoothstep',
-        edgeColor: '#94a3b8',
+        backgroundStyle: 'none',
+        backgroundColor: '#ffffff',
+        edgeStyle: 'brace',
+        edgeColor: '#ff6b4a',
         diagramMode: 'mindmap',
-        showMinimap: true,
+        showMinimap: false,
         showControls: true,
     };
     const [settings, setSettings] = useState({ ...defaultSettings, ...(mindmap.settings || {}) });
@@ -894,12 +894,21 @@ function MindmapCanvas({ mindmap, canEdit = true, isRenderView = false }: EditPr
                         maxZoom={2.5}
                         style={{ backgroundColor: settings.backgroundColor }}
                     >
-                        <Background
-                            variant={BackgroundVariant.Dots}
-                            gap={20}
-                            size={1.5}
-                            color="#cbd5e1"
-                        />
+                        {settings.backgroundStyle === 'dots' && (
+                            <Background
+                                variant={BackgroundVariant.Dots}
+                                gap={24}
+                                size={1}
+                                color="#e2e8f0"
+                            />
+                        )}
+                        {settings.backgroundStyle === 'lines' && (
+                            <Background
+                                variant={BackgroundVariant.Lines}
+                                gap={24}
+                                color="#f1f5f9"
+                            />
+                        )}
                         {settings.showControls && <Controls className="bg-white border border-gray-200 shadow-sm rounded-xl" />}
                         {settings.showMinimap && (
                             <MiniMap
