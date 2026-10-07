@@ -1,1 +1,0 @@
-import"./rolldown-runtime-hePW80VL.js";import{n as e,u as t}from"./app-3KEIXuL4.js";t();var n=e();function r({className:e=``,...t}){return(0,n.jsx)(`input`,{...t,type:`checkbox`,className:`rounded border-gray-300 text-blue-600 shadow-sm focus:ring-blue-500 ${e}`})}export{r as t};

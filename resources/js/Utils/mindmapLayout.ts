@@ -87,20 +87,20 @@ export function layoutMindmap(
 
         if (nodeId === rootId || level === 0) {
             const textW = measureText(label || 'Central Topic', 'bold 22px Inter, -apple-system, sans-serif', 14);
-            return { width: Math.max(110, textW + 32), height: 42 };
+            return { width: Math.max(120, textW + 40), height: 44 };
         }
         if (level === 1) {
             const textW = measureText(label || 'Main Topic', '600 14px Inter, -apple-system, sans-serif', 10);
-            return { width: Math.max(70, textW + 28), height: 34 };
+            return { width: Math.max(80, textW + 36), height: 36 };
         }
         if (level === 2) {
             // Level 2 Subtopic: Soft Tint Pill Badge
-            const textW = measureText(label || 'Subtopic', '500 13px Inter, -apple-system, sans-serif', 9);
-            return { width: Math.max(50, textW + 24), height: 28 };
+            const textW = measureText(label || 'Subtopic', '500 13px Inter, -apple-system, sans-serif', 9.5);
+            return { width: Math.max(60, textW + 32), height: 30 };
         }
         // Level 3+ Subtopics: Clean Plain Text
-        const textW = measureText(label || 'Subtopic', '500 13px Inter, -apple-system, sans-serif', 9);
-        return { width: Math.max(36, textW + 18), height: 24 };
+        const textW = measureText(label || 'Subtopic', '500 13px Inter, -apple-system, sans-serif', 9.5);
+        return { width: Math.max(40, textW + 28), height: 26 };
     };
 
     const H_GAP_ROOT = 55;  // Organic sweeping horizontal gap from Central Topic to Main Topics
@@ -116,7 +116,10 @@ export function layoutMindmap(
     nodes.forEach((n) => {
         const isRootNode = n.id === rootId;
         const isLevel1Node = rootChildren.includes(n.id);
-        const dim = getNodeDim(n.id, isRootNode ? 0 : isLevel1Node ? 1 : 2);
+        const parentId = rawEdges.find((e) => e.target === n.id)?.source;
+        const isLevel2Node = Boolean(parentId && rootChildren.includes(parentId));
+        const nodeLevel = isRootNode ? 0 : isLevel1Node ? 1 : isLevel2Node ? 2 : 3;
+        const dim = getNodeDim(n.id, nodeLevel);
         nodeWidths.set(n.id, dim.width);
         nodeHeights.set(n.id, dim.height);
     });

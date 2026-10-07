@@ -713,15 +713,15 @@ function MindmapCanvas({ mindmap, canEdit = true, isRenderView = false }: EditPr
                 <header className="h-14 bg-white border-b border-gray-200 px-4 flex items-center justify-between z-30 shrink-0">
                     <div className="flex items-center space-x-3">
                         <Link
-                            href={route('dashboard')}
+                            href={canEdit ? route('dashboard') : '/'}
                             className="p-1.5 text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition"
-                            title="Back to Dashboard"
+                            title={canEdit ? 'Back to Dashboard' : 'Home'}
                         >
                             <ArrowLeft className="w-5 h-5" />
                         </Link>
 
                         {/* Mindmap Title */}
-                        {isEditingTitle ? (
+                        {isEditingTitle && canEdit ? (
                             <input
                                 value={title}
                                 autoFocus
@@ -733,60 +733,70 @@ function MindmapCanvas({ mindmap, canEdit = true, isRenderView = false }: EditPr
                                 className="px-2 py-1 text-sm font-semibold text-gray-900 border border-blue-500 rounded-lg focus:outline-none ring-2 ring-blue-100"
                             />
                         ) : (
-                            <button
-                                onClick={() => canEdit && setIsEditingTitle(true)}
-                                className="text-sm font-semibold text-gray-900 hover:bg-gray-50 px-2 py-1 rounded-lg transition truncate max-w-xs"
-                                title="Click to Rename"
-                            >
-                                {title}
-                            </button>
+                            <div className="flex items-center gap-2">
+                                <button
+                                    onClick={() => canEdit && setIsEditingTitle(true)}
+                                    className={`text-sm font-semibold text-gray-900 px-2 py-1 rounded-lg transition truncate max-w-xs ${
+                                        canEdit ? 'hover:bg-gray-50 cursor-pointer' : 'cursor-default'
+                                    }`}
+                                    title={canEdit ? 'Click to Rename' : undefined}
+                                >
+                                    {title}
+                                </button>
+                                {!canEdit && (
+                                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-2xs font-semibold bg-gray-100 text-gray-600 border border-gray-200 uppercase tracking-wider">
+                                        Viewer
+                                    </span>
+                                )}
+                            </div>
                         )}
                     </div>
 
-                    {/* Middle Controls (Undo, Redo, Add Node, Layout) */}
-                    <div className="hidden md:flex items-center space-x-1 bg-gray-100/70 p-1 rounded-xl border border-gray-200/80">
-                        <button
-                            onClick={handleUndo}
-                            disabled={historyIndex <= 0}
-                            className="p-1.5 text-gray-600 hover:text-gray-900 hover:bg-white rounded-lg transition disabled:opacity-30 disabled:cursor-not-allowed"
-                            title="Undo (Ctrl+Z)"
-                        >
-                            <Undo2 className="w-4 h-4" />
-                        </button>
-                        <button
-                            onClick={handleRedo}
-                            disabled={historyIndex >= history.length - 1}
-                            className="p-1.5 text-gray-600 hover:text-gray-900 hover:bg-white rounded-lg transition disabled:opacity-30 disabled:cursor-not-allowed"
-                            title="Redo (Ctrl+Y)"
-                        >
-                            <Redo2 className="w-4 h-4" />
-                        </button>
+                    {/* Middle Controls (Undo, Redo, Add Node, Layout) - Only in Edit Mode */}
+                    {canEdit && (
+                        <div className="hidden md:flex items-center space-x-1 bg-gray-100/70 p-1 rounded-xl border border-gray-200/80">
+                            <button
+                                onClick={handleUndo}
+                                disabled={historyIndex <= 0}
+                                className="p-1.5 text-gray-600 hover:text-gray-900 hover:bg-white rounded-lg transition disabled:opacity-30 disabled:cursor-not-allowed"
+                                title="Undo (Ctrl+Z)"
+                            >
+                                <Undo2 className="w-4 h-4" />
+                            </button>
+                            <button
+                                onClick={handleRedo}
+                                disabled={historyIndex >= history.length - 1}
+                                className="p-1.5 text-gray-600 hover:text-gray-900 hover:bg-white rounded-lg transition disabled:opacity-30 disabled:cursor-not-allowed"
+                                title="Redo (Ctrl+Y)"
+                            >
+                                <Redo2 className="w-4 h-4" />
+                            </button>
 
-                        <div className="w-px h-4 bg-gray-300 mx-1" />
+                            <div className="w-px h-4 bg-gray-300 mx-1" />
 
-                        <button
-                            onClick={() => selectedNode ? handleAddChild(selectedNode.id) : handleAddChild('root')}
-                            disabled={!canEdit}
-                            className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold text-gray-700 hover:text-blue-600 hover:bg-white rounded-lg transition"
-                            title="Add Child Subtopic (Tab)"
-                        >
-                            <Plus className="w-3.5 h-3.5" />
-                            <span>Add Node</span>
-                        </button>
+                            <button
+                                onClick={() => selectedNode ? handleAddChild(selectedNode.id) : handleAddChild('root')}
+                                className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold text-gray-700 hover:text-blue-600 hover:bg-white rounded-lg transition"
+                                title="Add Child Subtopic (Tab)"
+                            >
+                                <Plus className="w-3.5 h-3.5" />
+                                <span>Add Node</span>
+                            </button>
 
-                        <button
-                            onClick={() => layoutTree('LR')}
-                            className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold text-gray-700 hover:text-blue-600 hover:bg-white rounded-lg transition"
-                            title="Auto Tidy Layout"
-                        >
-                            <Layout className="w-3.5 h-3.5" />
-                            <span>Auto Layout</span>
-                        </button>
-                    </div>
+                            <button
+                                onClick={() => layoutTree('LR')}
+                                className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold text-gray-700 hover:text-blue-600 hover:bg-white rounded-lg transition"
+                                title="Auto Tidy Layout"
+                            >
+                                <Layout className="w-3.5 h-3.5" />
+                                <span>Auto Layout</span>
+                            </button>
+                        </div>
+                    )}
 
-                    {/* Right Actions (Outliner, Inspector, Share, Export) */}
+                    {/* Right Actions */}
                     <div className="flex items-center space-x-2">
-                        {/* Outliner toggle */}
+                        {/* Outliner toggle (Accessible to both editor and viewers) */}
                         <button
                             onClick={() => setIsOutlinerOpen((v) => !v)}
                             className={`p-2 rounded-lg transition text-xs font-medium inline-flex items-center gap-1.5 ${
@@ -798,101 +808,106 @@ function MindmapCanvas({ mindmap, canEdit = true, isRenderView = false }: EditPr
                             <span className="hidden lg:inline">Outline</span>
                         </button>
 
-                        {/* Inspector Panel toggle */}
-                        <button
-                            onClick={() => setIsRightPanelOpen((v) => !v)}
-                            className={`p-2 rounded-lg transition text-xs font-medium inline-flex items-center gap-1.5 ${
-                                isRightPanelOpen ? 'bg-blue-50 text-blue-600' : 'text-gray-600 hover:bg-gray-100'
-                            }`}
-                            title="Format Inspector"
-                        >
-                            <Sliders className="w-4 h-4" />
-                            <span className="hidden lg:inline">Style</span>
-                        </button>
+                        {/* Editor-only tools: Style, Import, Export, Share */}
+                        {canEdit && (
+                            <>
+                                {/* Inspector Panel toggle */}
+                                <button
+                                    onClick={() => setIsRightPanelOpen((v) => !v)}
+                                    className={`p-2 rounded-lg transition text-xs font-medium inline-flex items-center gap-1.5 ${
+                                        isRightPanelOpen ? 'bg-blue-50 text-blue-600' : 'text-gray-600 hover:bg-gray-100'
+                                    }`}
+                                    title="Format Inspector"
+                                >
+                                    <Sliders className="w-4 h-4" />
+                                    <span className="hidden lg:inline">Style</span>
+                                </button>
 
-                        {/* Hidden Import Input */}
-                        <input
-                            ref={importFileInputRef}
-                            type="file"
-                            accept=".talawire,.json"
-                            className="hidden"
-                            onChange={handleImportJsonFile}
-                        />
+                                {/* Hidden Import Input */}
+                                <input
+                                    ref={importFileInputRef}
+                                    type="file"
+                                    accept=".talawire,.json"
+                                    className="hidden"
+                                    onChange={handleImportJsonFile}
+                                />
 
-                        {/* Import Button */}
-                        <button
-                            onClick={() => importFileInputRef.current?.click()}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 shadow-2xs transition"
-                            title="Import .talawire / JSON"
-                        >
-                            <Upload className="w-3.5 h-3.5 text-gray-500" />
-                            <span className="hidden sm:inline">Import</span>
-                        </button>
+                                {/* Import Button */}
+                                <button
+                                    onClick={() => importFileInputRef.current?.click()}
+                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 shadow-2xs transition"
+                                    title="Import .talawire / JSON"
+                                >
+                                    <Upload className="w-3.5 h-3.5 text-gray-500" />
+                                    <span className="hidden sm:inline">Import</span>
+                                </button>
 
-                        {/* Export Menu */}
-                        <div className="relative">
-                            <button
-                                onClick={() => setIsExportMenuOpen((v) => !v)}
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 shadow-2xs transition"
-                            >
-                                <Download className="w-3.5 h-3.5" />
-                                <span>Export</span>
-                            </button>
+                                {/* Export Menu */}
+                                <div className="relative">
+                                    <button
+                                        onClick={() => setIsExportMenuOpen((v) => !v)}
+                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 shadow-2xs transition"
+                                    >
+                                        <Download className="w-3.5 h-3.5" />
+                                        <span>Export</span>
+                                    </button>
 
-                            {isExportMenuOpen && (
-                                <div className="absolute right-0 mt-2 w-48 bg-white border border-gray-200 rounded-xl shadow-lg py-1.5 z-50">
-                                    <button
-                                        onClick={() => {
-                                            setIsExportMenuOpen(false);
-                                            importFileInputRef.current?.click();
-                                        }}
-                                        className="w-full px-4 py-2 text-left text-xs font-medium text-gray-700 hover:bg-gray-50 flex items-center justify-between"
-                                    >
-                                        <span>Import (.talawire)</span>
-                                        <Upload className="w-3.5 h-3.5 text-gray-400" />
-                                    </button>
-                                    <div className="border-t border-gray-100 my-1" />
-                                    <button
-                                        onClick={exportToPngImage}
-                                        className="w-full px-4 py-2 text-left text-xs font-medium text-gray-700 hover:bg-gray-50 flex items-center justify-between"
-                                    >
-                                        <span>Export Image (PNG)</span>
-                                    </button>
-                                    <button
-                                        onClick={exportToPdfDoc}
-                                        className="w-full px-4 py-2 text-left text-xs font-medium text-gray-700 hover:bg-gray-50 flex items-center justify-between"
-                                    >
-                                        <span>Export Document (PDF)</span>
-                                    </button>
-                                    <button
-                                        onClick={exportToJsonFile}
-                                        className="w-full px-4 py-2 text-left text-xs font-medium text-gray-700 hover:bg-gray-50 flex items-center justify-between"
-                                    >
-                                        <span>Download (.talawire)</span>
-                                    </button>
-                                    <div className="border-t border-gray-100 my-1" />
-                                    <button
-                                        onClick={() => {
-                                            setIsExportMenuOpen(false);
-                                            setIsVideoRecordModalOpen(true);
-                                        }}
-                                        className="w-full px-4 py-2 text-left text-xs font-medium text-blue-600 hover:bg-blue-50 flex items-center justify-between"
-                                    >
-                                        <span>Render Video</span>
-                                        <Video className="w-3.5 h-3.5" />
-                                    </button>
+                                    {isExportMenuOpen && (
+                                        <div className="absolute right-0 mt-2 w-48 bg-white border border-gray-200 rounded-xl shadow-lg py-1.5 z-50">
+                                            <button
+                                                onClick={() => {
+                                                    setIsExportMenuOpen(false);
+                                                    importFileInputRef.current?.click();
+                                                }}
+                                                className="w-full px-4 py-2 text-left text-xs font-medium text-gray-700 hover:bg-gray-50 flex items-center justify-between"
+                                            >
+                                                <span>Import (.talawire)</span>
+                                                <Upload className="w-3.5 h-3.5 text-gray-400" />
+                                            </button>
+                                            <div className="border-t border-gray-100 my-1" />
+                                            <button
+                                                onClick={exportToPngImage}
+                                                className="w-full px-4 py-2 text-left text-xs font-medium text-gray-700 hover:bg-gray-50 flex items-center justify-between"
+                                            >
+                                                <span>Export Image (PNG)</span>
+                                            </button>
+                                            <button
+                                                onClick={exportToPdfDoc}
+                                                className="w-full px-4 py-2 text-left text-xs font-medium text-gray-700 hover:bg-gray-50 flex items-center justify-between"
+                                            >
+                                                <span>Export Document (PDF)</span>
+                                            </button>
+                                            <button
+                                                onClick={exportToJsonFile}
+                                                className="w-full px-4 py-2 text-left text-xs font-medium text-gray-700 hover:bg-gray-50 flex items-center justify-between"
+                                            >
+                                                <span>Download (.talawire)</span>
+                                            </button>
+                                            <div className="border-t border-gray-100 my-1" />
+                                            <button
+                                                onClick={() => {
+                                                    setIsExportMenuOpen(false);
+                                                    setIsVideoRecordModalOpen(true);
+                                                }}
+                                                className="w-full px-4 py-2 text-left text-xs font-medium text-blue-600 hover:bg-blue-50 flex items-center justify-between"
+                                            >
+                                                <span>Render Video</span>
+                                                <Video className="w-3.5 h-3.5" />
+                                            </button>
+                                        </div>
+                                    )}
                                 </div>
-                            )}
-                        </div>
 
-                        {/* Share Button */}
-                        <button
-                            onClick={() => setIsShareModalOpen(true)}
-                            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-2xs transition"
-                        >
-                            <Share2 className="w-3.5 h-3.5" />
-                            <span>Share</span>
-                        </button>
+                                {/* Share Button */}
+                                <button
+                                    onClick={() => setIsShareModalOpen(true)}
+                                    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-2xs transition"
+                                >
+                                    <Share2 className="w-3.5 h-3.5" />
+                                    <span>Share</span>
+                                </button>
+                            </>
+                        )}
                     </div>
                 </header>
             )}
@@ -984,7 +999,7 @@ function MindmapCanvas({ mindmap, canEdit = true, isRenderView = false }: EditPr
                 </div>
 
                 {/* Right Inspector Style Panel */}
-                {isRightPanelOpen && (
+                {canEdit && isRightPanelOpen && (
                     <aside className="w-72 bg-white border-l border-gray-200 h-full flex flex-col z-20 shadow-sm overflow-y-auto">
                         <div className="p-3.5 border-b border-gray-100 flex items-center justify-between">
                             <span className="text-xs font-semibold text-gray-900 uppercase tracking-wider">

@@ -1,0 +1,1 @@
+import"./rolldown-runtime-hePW80VL.js";import{n as e,u as t}from"./app-Ca5TbB96.js";import n from"./Edit-C9Ld7_zW.js";t();var r=e();function i(e){return(0,r.jsx)(n,{...e})}export{i as default};
