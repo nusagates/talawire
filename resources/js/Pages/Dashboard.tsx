@@ -5,7 +5,8 @@ import ConfirmationModal from '@/Components/ConfirmationModal';
 import SecondaryButton from '@/Components/SecondaryButton';
 import DangerButton from '@/Components/DangerButton';
 import { Project, Mindmap } from '@/types';
-import { Plus, Network, Trash2, FolderGit2 } from 'lucide-react';
+import { Plus, Network, Trash2, FolderGit2, Upload } from 'lucide-react';
+import { importMindmapFromFile } from '@/Utils/mindmapStorage';
 
 interface DashboardProps {
     projects?: Project[];
@@ -13,12 +14,33 @@ interface DashboardProps {
 
 export default function Dashboard({ projects = [] }: DashboardProps) {
     const [mindmapToDelete, setMindmapToDelete] = useState<Mindmap | null>(null);
+    const [isImporting, setIsImporting] = useState(false);
+    const fileInputRef = React.useRef<HTMLInputElement>(null);
 
     const deleteMindmap = () => {
         if (mindmapToDelete) {
             router.delete(route('mindmaps.destroy', mindmapToDelete.id), {
                 onFinish: () => setMindmapToDelete(null),
             });
+        }
+    };
+
+    const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        setIsImporting(true);
+        try {
+            const data = await importMindmapFromFile(file);
+            router.post(route('mindmaps.store'), {
+                name: data.name || file.name.replace(/\.(talawire|json)$/i, ''),
+                nodes: data.nodes || [],
+                edges: data.edges || [],
+                settings: data.settings || {},
+            });
+        } catch (err: any) {
+            alert('Gagal mengimpor file: ' + err.message);
+            setIsImporting(false);
         }
     };
 
@@ -36,15 +58,33 @@ export default function Dashboard({ projects = [] }: DashboardProps) {
                         <p className="text-xs text-gray-500 mt-0.5">Manage your team projects and visual mindmaps</p>
                     </div>
 
-                    <Link
-                        href={route('mindmaps.store')}
-                        method="post"
-                        as="button"
-                        className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 border border-transparent rounded-lg font-medium text-xs text-white hover:bg-blue-700 active:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all shadow-sm cursor-pointer"
-                    >
-                        <Plus className="w-4 h-4" />
-                        New Mindmap
-                    </Link>
+                    <div className="flex items-center gap-2">
+                        <input
+                            ref={fileInputRef}
+                            type="file"
+                            accept=".talawire,.json"
+                            className="hidden"
+                            onChange={handleFileUpload}
+                        />
+                        <button
+                            onClick={() => fileInputRef.current?.click()}
+                            disabled={isImporting}
+                            className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-white border border-gray-300 rounded-lg font-medium text-xs text-gray-700 hover:bg-gray-50 active:bg-gray-100 transition-all shadow-xs cursor-pointer disabled:opacity-50"
+                        >
+                            <Upload className="w-4 h-4 text-gray-500" />
+                            {isImporting ? 'Importing...' : 'Import (.talawire)'}
+                        </button>
+
+                        <Link
+                            href={route('mindmaps.store')}
+                            method="post"
+                            as="button"
+                            className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 border border-transparent rounded-lg font-medium text-xs text-white hover:bg-blue-700 active:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all shadow-sm cursor-pointer"
+                        >
+                            <Plus className="w-4 h-4" />
+                            New Mindmap
+                        </Link>
+                    </div>
                 </div>
             )}
         >

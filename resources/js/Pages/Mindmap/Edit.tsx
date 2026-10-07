@@ -61,6 +61,7 @@ import {
     Check,
     X,
     FolderGit2,
+    Upload,
 } from 'lucide-react';
 
 const nodeTypes = {
@@ -596,6 +597,8 @@ function MindmapCanvas({ mindmap, canEdit = true, isRenderView = false }: EditPr
         }
     };
 
+    const importFileInputRef = useRef<HTMLInputElement>(null);
+
     const exportToJsonFile = () => {
         setIsExportMenuOpen(false);
         exportMindmapToFile({
@@ -605,6 +608,36 @@ function MindmapCanvas({ mindmap, canEdit = true, isRenderView = false }: EditPr
             settings,
         });
         showToast('Berhasil mengekspor file .talawire!', 'success');
+    };
+
+    const handleImportJsonFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        try {
+            const data = await importMindmapFromFile(file);
+            if (data.nodes && Array.isArray(data.nodes)) {
+                setNodes(data.nodes);
+            }
+            if (data.edges && Array.isArray(data.edges)) {
+                setEdges(data.edges);
+            }
+            if (data.name) {
+                setTitle(data.name);
+            }
+            if (data.settings) {
+                setSettings((prev) => ({ ...prev, ...data.settings }));
+            }
+            setIsExportMenuOpen(false);
+            showToast('Berhasil mengimpor file .talawire!', 'success');
+            setTimeout(() => {
+                fitView({ duration: 600, padding: 0.2 });
+            }, 200);
+        } catch (err: any) {
+            showToast('Gagal mengimpor file: ' + err.message, 'error');
+        } finally {
+            if (e.target) e.target.value = '';
+        }
     };
 
     // Video Recording Server Process
@@ -777,6 +810,25 @@ function MindmapCanvas({ mindmap, canEdit = true, isRenderView = false }: EditPr
                             <span className="hidden lg:inline">Style</span>
                         </button>
 
+                        {/* Hidden Import Input */}
+                        <input
+                            ref={importFileInputRef}
+                            type="file"
+                            accept=".talawire,.json"
+                            className="hidden"
+                            onChange={handleImportJsonFile}
+                        />
+
+                        {/* Import Button */}
+                        <button
+                            onClick={() => importFileInputRef.current?.click()}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 shadow-2xs transition"
+                            title="Import .talawire / JSON"
+                        >
+                            <Upload className="w-3.5 h-3.5 text-gray-500" />
+                            <span className="hidden sm:inline">Import</span>
+                        </button>
+
                         {/* Export Menu */}
                         <div className="relative">
                             <button
@@ -789,6 +841,17 @@ function MindmapCanvas({ mindmap, canEdit = true, isRenderView = false }: EditPr
 
                             {isExportMenuOpen && (
                                 <div className="absolute right-0 mt-2 w-48 bg-white border border-gray-200 rounded-xl shadow-lg py-1.5 z-50">
+                                    <button
+                                        onClick={() => {
+                                            setIsExportMenuOpen(false);
+                                            importFileInputRef.current?.click();
+                                        }}
+                                        className="w-full px-4 py-2 text-left text-xs font-medium text-gray-700 hover:bg-gray-50 flex items-center justify-between"
+                                    >
+                                        <span>Import (.talawire)</span>
+                                        <Upload className="w-3.5 h-3.5 text-gray-400" />
+                                    </button>
+                                    <div className="border-t border-gray-100 my-1" />
                                     <button
                                         onClick={exportToPngImage}
                                         className="w-full px-4 py-2 text-left text-xs font-medium text-gray-700 hover:bg-gray-50 flex items-center justify-between"

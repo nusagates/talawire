@@ -1,0 +1,1 @@
+import"./rolldown-runtime-hePW80VL.js";import{n as e,u as t}from"./app-3KEIXuL4.js";t();var n=e();function r(){return(0,n.jsx)(`div`,{className:`hidden sm:block`,children:(0,n.jsx)(`div`,{className:`py-8`,children:(0,n.jsx)(`div`,{className:`border-t border-gray-200`})})})}export{r as t};

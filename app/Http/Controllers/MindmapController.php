@@ -22,9 +22,10 @@ class MindmapController extends Controller
         ]);
 
         $mindmap = $project->mindmaps()->create([
-            'name' => 'Untitled Mindmap',
-            'nodes' => [],
-            'edges' => [],
+            'name' => $request->input('name', 'Untitled Mindmap'),
+            'nodes' => $request->input('nodes', []),
+            'edges' => $request->input('edges', []),
+            'settings' => $request->input('settings', []),
         ]);
 
         return redirect()->route('mindmaps.edit', $mindmap);

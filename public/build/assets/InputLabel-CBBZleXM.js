@@ -1,1 +1,0 @@
-import"./rolldown-runtime-hePW80VL.js";import{n as e,u as t}from"./app-B5Z6iAp7.js";t();var n=e();function r({value:e,className:t=``,children:r,...i}){return(0,n.jsx)(`label`,{...i,className:`block font-medium text-sm text-gray-700 ${t}`,children:e||r})}export{r as t};

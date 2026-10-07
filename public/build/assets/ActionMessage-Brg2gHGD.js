@@ -1,0 +1,1 @@
+import"./rolldown-runtime-hePW80VL.js";import{n as e,u as t}from"./app-3KEIXuL4.js";t();var n=e();function r({on:e=!1,className:t=``,children:r}){return e?(0,n.jsx)(`div`,{className:`text-sm text-gray-600 transition-opacity duration-300 ${t}`,children:r}):null}export{r as t};
