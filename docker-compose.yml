@@ -37,7 +37,7 @@ services:
       POSTGRES_USER: ${DB_USERNAME:-postgres}
       POSTGRES_PASSWORD: ${DB_PASSWORD:-root}
     ports:
-      - "5438:5432"
+      - "127.0.0.1:5438:5432"
     volumes:
       - talawire_db_data:/var/lib/postgresql/data
     networks:
