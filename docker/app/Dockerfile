@@ -30,7 +30,10 @@ RUN docker-php-ext-configure gd --with-freetype --with-jpeg \
 # Install Composer
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 
-# Install Node.js & npm (for Vite)
+# Install Bun (ultra-fast JS package manager & bundler)
+COPY --from=oven/bun:latest /usr/local/bin/bun /usr/local/bin/bun
+
+# Install Node.js & npm (for compatibility)
 RUN curl -sL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y nodejs
 
